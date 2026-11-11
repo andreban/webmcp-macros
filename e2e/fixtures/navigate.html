@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Navigation fixture</title>
+  </head>
+  <body>
+    <!--
+      Tools that move the tab. Page A navigates to page B with a full load;
+      page B moves to view C in place (history.pushState), as an SPA route
+      change would. Each page or view registers a different tool, so a run
+      can only finish by following the navigations.
+    -->
+    <p>Page: <output id="page"></output></p>
+    <script>
+      let controller;
+      const params = () => new URLSearchParams(location.search);
+      const view = () => (params().get("page") === "b" ? (params().get("view") === "c" ? "C" : "B") : "A");
+
+      function sync() {
+        controller?.abort();
+        controller = new AbortController();
+        const register = (tool) => document.modelContext.registerTool(tool, { signal: controller.signal });
+        const page = view();
+        document.getElementById("page").textContent = page;
+        if (page === "A") {
+          register({
+            name: "open_page_b",
+            description: "Loads page B.",
+            execute: () => void (location.href = "?page=b"),
+          });
+          register({
+            name: "leave_for_blank",
+            description: "Loads a page with no content script.",
+            execute: () => void (location.href = "about:blank"),
+          });
+        }
+        if (page === "B") {
+          register({
+            name: "open_view_c",
+            description: "Shows view C without a page load.",
+            execute: () => {
+              history.pushState(null, "", "?page=b&view=c");
+              sync();
+            },
+          });
+        }
+        if (page === "C") {
+          register({
+            name: "finish",
+            description: "Marks the journey done.",
+            execute: () => {
+              document.getElementById("page").textContent = "DONE";
+              return { done: true };
+            },
+          });
+        }
+      }
+
+      if (document.modelContext) sync();
+      else document.getElementById("page").textContent = "NO_WEBMCP";
+    </script>
+  </body>
+</html>

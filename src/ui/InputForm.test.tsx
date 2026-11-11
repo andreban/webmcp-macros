@@ -1,8 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveRelativeDate } from "../macro/relativeDate";
 import { MACRO_VERSION, type Macro, type MacroInput } from "../macro/types";
 import { flightSearchMacro as flightSearch } from "../samples/flightSearch";
-import { coerceValues, fieldFor, initialValues, InputFormView } from "./InputForm";
+import { coerceValues, fieldFor, fillFromPreset, initialValues, InputFormView, presetValues } from "./InputForm";
 
 describe("fieldFor", () => {
   it("maps each schema shape to its field", () => {
@@ -78,6 +79,54 @@ describe("coerceValues", () => {
   });
 });
 
+describe("presets in the form", () => {
+  const inputs: MacroInput[] = [
+    { key: "to", label: "To", schema: { type: "string" } },
+    { key: "seats", label: "Seats", schema: { type: "integer" } },
+    { key: "day", label: "Day", schema: { type: "string", format: "date" } },
+    { key: "flexible", label: "Flexible", schema: { type: "boolean" } },
+  ];
+
+  it("saves only fields that are valid on their own, typed", () => {
+    expect(presetValues(inputs, { to: "LIS", seats: "1.5", day: "", flexible: true })).toEqual({ to: "LIS", flexible: true });
+  });
+
+  it("fills held fields from a preset and keeps the others", () => {
+    const current = { to: "NYC", seats: "1", day: "2026-12-01", flexible: false };
+    const stored = { to: "LIS", seats: 2, flexible: true, day: 20261201, gone: "x" };
+    expect(fillFromPreset(inputs, current, stored)).toEqual({ to: "LIS", seats: "2", day: "2026-12-01", flexible: true });
+  });
+});
+
+describe("relative dates in the form", () => {
+  const inputs: MacroInput[] = [
+    { key: "out", label: "Out", schema: { type: "string", format: "date" }, default: "today+14d" },
+    { key: "fixed", label: "Fixed", schema: { type: "string", format: "date" }, default: "2026-12-24" },
+    { key: "text", label: "Text", schema: { type: "string" }, default: "today+1d" },
+  ];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 0, 31, 12));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("resolves relative date defaults when the form opens and leaves other values alone", () => {
+    expect(initialValues(inputs, {})).toEqual({ out: "2026-02-14", fixed: "2026-12-24", text: "today+1d" });
+  });
+
+  it("resolves a relative date held by a preset", () => {
+    const current = { out: "2026-02-14", fixed: "2026-12-24", text: "x" };
+    expect(fillFromPreset(inputs, current, { out: "today+1m", fixed: "today" })).toEqual({
+      out: "2026-02-28",
+      fixed: "2026-01-31",
+      text: "x",
+    });
+  });
+});
+
 describe("InputFormView", () => {
   const macro: Macro = {
     ...flightSearch,
@@ -109,7 +158,8 @@ describe("InputFormView", () => {
     expect(html).toContain('<option value="">Choose…</option>');
     expect(html).toContain('<option value="Up to 1 stop" selected="">');
     expect(control("Passengers")).toMatchObject({ type: "number", value: "1", min: "1", step: "any", required: "" });
-    expect(control("Depart")).toMatchObject({ type: "date", value: "", required: "" });
+    expect(control("Depart")).toMatchObject({ type: "date", value: resolveRelativeDate("today+14d"), required: "" });
+    expect(control("Return")).toMatchObject({ type: "date", value: resolveRelativeDate("today+21d") });
     expect(control("To (IATA)")).toMatchObject({ type: "text", value: "NYC", pattern: "^[A-Z]{3}$", required: "" });
     expect(control("Flexible dates")).toMatchObject({ type: "checkbox" });
     expect(control("Flexible dates")).not.toHaveProperty("required");
@@ -117,6 +167,13 @@ describe("InputFormView", () => {
 
   it("pre-fills remembered values over defaults", () => {
     expect(control("From (IATA)")).toMatchObject({ value: "SFO" });
+  });
+
+  it("offers presets above the fields without making the name field required", () => {
+    expect(html).toMatch(/^<form class="wmm-form"><fieldset class="wmm-presets"><legend>Presets<\/legend>/);
+    expect(control("Preset name")).toMatchObject({ type: "text" });
+    expect(control("Preset name")).not.toHaveProperty("required");
+    expect(html).not.toMatch(/<button(?![^>]*type="button")[^>]*>(Save values|Rename|Delete)</);
   });
 
   it("renders the submit and cancel actions", () => {

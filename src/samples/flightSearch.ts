@@ -41,8 +41,9 @@ export const flightSearchMacro: Macro = {
       mode: "ask",
       default: "NYC",
     },
-    { key: "outboundDate", label: "Depart", schema: { type: "string", format: "date" }, mode: "ask" },
-    { key: "inboundDate", label: "Return", schema: { type: "string", format: "date" }, mode: "ask" },
+    // Relative defaults, resolved when the form opens, so the sample never offers a past date.
+    { key: "outboundDate", label: "Depart", schema: { type: "string", format: "date" }, mode: "ask", default: "today+14d" },
+    { key: "inboundDate", label: "Return", schema: { type: "string", format: "date" }, mode: "ask", default: "today+21d" },
     {
       key: "passengers",
       label: "Passengers",

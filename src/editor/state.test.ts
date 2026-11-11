@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { MACRO_VERSION, type Macro, type Stmt } from "../macro/types";
+import { MACRO_VERSION, type Macro, type MacroInput, type Stmt } from "../macro/types";
 import {
   createEditorState,
+  describePath,
   editorReducer,
   getNode,
+  inputKeyError,
+  inputReferences,
   moveTarget,
   type EditorAction,
   type EditorState,
@@ -53,6 +56,24 @@ describe("getNode", () => {
     expect(getNode(macro, ["program", 1, "else"])).toEqual({ kind: "body", node: [] });
     expect(getNode(macro, ["program", 4])).toEqual({ kind: "stmt", node: undefined });
     expect(getNode(macro, ["program", 3, "args", "constructor"])).toEqual({ kind: "expr", node: undefined });
+  });
+
+  it("reads the slots of data statements and expressions", () => {
+    const data: Macro = {
+      ...macro,
+      program: [
+        { op: "setKey", var: "d", key: { lit: "k" }, value: { length: { keys: { var: "d" } } } },
+        { op: "push", var: "q", value: { contains: { var: "q" }, item: { getKey: { var: "d" }, key: { lit: "k" } } } },
+        { op: "popFront", var: "q", saveAs: "x" },
+      ],
+    };
+    expect(getNode(data, ["program", 0, "key"])).toEqual({ kind: "expr", node: { lit: "k" } });
+    expect(getNode(data, ["program", 0, "value", "length", "keys"])).toEqual({ kind: "expr", node: { var: "d" } });
+    expect(getNode(data, ["program", 1, "value", "item", "key"])).toEqual({ kind: "expr", node: { lit: "k" } });
+    expect(getNode(data, ["program", 1, "value", "contains"])).toEqual({ kind: "expr", node: { var: "q" } });
+    // Variable names are not expression slots.
+    expect(getNode(data, ["program", 2, "saveAs"])).toBeUndefined();
+    expect(getNode(data, ["program", 0, "var"])).toBeUndefined();
   });
 
   it.each([
@@ -150,6 +171,17 @@ describe("editorReducer", () => {
     expect(before).toEqual(snapshot);
   });
 
+  it("clears an optional field and records one undo step", () => {
+    const start = createEditorState(sample());
+    const withMessage = run(start, { type: "insertStmt", at: ["program", 0], stmt: { op: "stop", message: { lit: "bye" } } });
+    const cleared = run(withMessage, { type: "clearSlot", at: ["program", 0, "message"] });
+    expect(cleared.macro.program[0]).toEqual({ op: "stop" });
+    expect(cleared.past).toHaveLength(2);
+    const noArgs = run(start, { type: "clearSlot", at: ["program", 3, "args"] });
+    expect(noArgs.macro.program[3]).toEqual({ op: "call", tool: "look" });
+    expect(run(noArgs, { type: "undo" }).macro).toBe(start.macro);
+  });
+
   it("updates metadata and ignores a patch that changes nothing", () => {
     const start = createEditorState(sample());
     const renamed = run(start, { type: "setMeta", meta: { name: "New", description: "Does things" } });
@@ -173,6 +205,12 @@ describe("editorReducer", () => {
     { type: "replaceNode", at: ["program", 1], node: { lit: 1 } },
     { type: "replaceNode", at: ["program", 4], node: msg("x") },
     { type: "replaceNode", at: ["program", 0, "cond"], node: { lit: 1 } },
+    { type: "clearSlot", at: ["program", 1, "cond"] },
+    { type: "clearSlot", at: ["program", 1, "else"] },
+    { type: "clearSlot", at: ["program", 1, "cond", "left"] },
+    { type: "clearSlot", at: ["program", 3, "tool"] },
+    { type: "clearSlot", at: ["program", 9, "else"] },
+    { type: "clearSlot", at: ["program"] },
     { type: "undo" },
     { type: "redo" },
   ])("returns the same state for %j", (action) => {
@@ -206,5 +244,90 @@ describe("editorReducer", () => {
     state = run(state, { type: "undo" }, { type: "undo" }, { type: "undo" }, { type: "undo" });
     expect(state.macro.name).toBe("n1");
     expect(run(createEditorState(sample(), 0), { type: "setMeta", meta: { name: "x" } }).past).toEqual([]);
+  });
+});
+
+describe("input actions", () => {
+  const text = (key: string): MacroInput => ({ key, label: key.toUpperCase(), schema: { type: "string" } });
+
+  // `when` is referenced in a nested body, inside an object and in a call argument;
+  // the literal that only looks like a reference must never be touched.
+  function withInputs(): Macro {
+    const macro = sample();
+    return {
+      ...macro,
+      inputs: [text("when"), text("who"), text("spare")],
+      program: [
+        ...macro.program,
+        {
+          op: "if",
+          cond: { not: { input: "who" } },
+          then: [{ op: "message", text: { input: "when" } }],
+          else: [{ op: "set", var: "o", value: { obj: { at: { input: "when" }, raw: { lit: { input: "when" } } } } }],
+        },
+        { op: "call", tool: "look", args: { dir: { list: [{ input: "when" }] } } },
+      ],
+    };
+  }
+
+  it("finds references by path and describes them as people count", () => {
+    const refs = inputReferences(withInputs(), "when");
+    expect(refs).toEqual([
+      ["program", 4, "then", 0, "text"],
+      ["program", 4, "else", 0, "value", "obj", "at"],
+      ["program", 5, "args", "dir", "list", 0],
+    ]);
+    expect(refs.map(describePath)).toEqual(["step 5 › then 1", "step 5 › else 1", "step 6"]);
+    expect(inputReferences(withInputs(), "spare")).toEqual([]);
+  });
+
+  it("renames a key in every reference, but not inside literals, as one undo step", () => {
+    const start = createEditorState(withInputs());
+    const state = run(start, { type: "updateInput", index: 0, input: { ...text("when"), key: "date" } });
+    expect(state.macro.inputs?.map((i) => i.key)).toEqual(["date", "who", "spare"]);
+    expect(inputReferences(state.macro, "when")).toEqual([]);
+    expect(inputReferences(state.macro, "date")).toHaveLength(3);
+    expect(getNode(state.macro, ["program", 4, "else", 0, "value", "obj", "raw"])?.node).toEqual({
+      lit: { input: "when" },
+    });
+    expect(getNode(state.macro, ["program", 4, "cond"])?.node).toEqual({ not: { input: "who" } });
+    expect(state.past).toHaveLength(1);
+    expect(run(state, { type: "undo" }).macro).toBe(start.macro);
+  });
+
+  it.each(["who", "2nd", "has space", "", "a-b"])("rejects the key %j when renaming or adding", (key) => {
+    const start = createEditorState(withInputs());
+    expect(run(start, { type: "updateInput", index: 0, input: { ...text("when"), key } })).toBe(start);
+    expect(run(start, { type: "addInput", input: text(key) })).toBe(start);
+    expect(inputKeyError(start.macro, key)).toBeTypeOf("string");
+  });
+
+  it("edits other fields without touching the program", () => {
+    const start = createEditorState(withInputs());
+    const state = run(start, { type: "updateInput", index: 1, input: { ...text("who"), mode: "remember" } });
+    expect(state.macro.inputs?.[1]?.mode).toBe("remember");
+    expect(state.macro.program).toBe(start.macro.program);
+    expect(inputKeyError(start.macro, "who", 1)).toBeUndefined();
+    expect(run(start, { type: "updateInput", index: 9, input: text("x") })).toBe(start);
+  });
+
+  it("adds to a macro without inputs, and moves inputs", () => {
+    const added = run(
+      createEditorState(sample()),
+      { type: "addInput", input: text("a") },
+      { type: "addInput", input: text("b") },
+    );
+    expect(added.macro.inputs?.map((i) => i.key)).toEqual(["a", "b"]);
+    expect(run(added, { type: "moveInput", from: 1, to: 0 }).macro.inputs?.map((i) => i.key)).toEqual(["b", "a"]);
+    for (const [from, to] of [[0, 0], [0, 2], [2, 0], [0, -1]] as const) {
+      expect(run(added, { type: "moveInput", from, to })).toBe(added);
+    }
+  });
+
+  it("removes an unused input and refuses one that is still referenced", () => {
+    const start = createEditorState(withInputs());
+    expect(run(start, { type: "removeInput", index: 0 })).toBe(start);
+    expect(run(start, { type: "removeInput", index: 1 })).toBe(start);
+    expect(run(start, { type: "removeInput", index: 2 }).macro.inputs?.map((i) => i.key)).toEqual(["when", "who"]);
   });
 });

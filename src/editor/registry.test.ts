@@ -30,7 +30,7 @@ const slotNames = (label: readonly (string | Slot)[]) =>
 
 describe("createDefault", () => {
   it("creates a node of the requested op for every statement", () => {
-    expect(ops).toHaveLength(11);
+    expect(ops).toHaveLength(16);
     for (const op of ops) expect(createDefault(op).op).toBe(op);
   });
 
@@ -64,13 +64,15 @@ describe("createDefault", () => {
 
 describe("exprKind", () => {
   it("identifies every expression kind by its key", () => {
-    expect(kinds).toHaveLength(10);
+    expect(kinds).toHaveLength(16);
     for (const kind of kinds) expect(exprKind(createDefaultExpr(kind))).toBe(kind);
   });
 
   it("ignores companion keys such as path and args", () => {
     expect(exprKind({ get: { var: "x" }, path: ["a"] })).toBe("get");
     expect(exprKind({ call: "t", args: {} })).toBe("call");
+    expect(exprKind({ key: { lit: "a" }, getKey: { var: "d" } })).toBe("getKey");
+    expect(exprKind({ item: { lit: 1 }, contains: { var: "l" } })).toBe("contains");
   });
 
   it("rejects an object that is no expression", () => {

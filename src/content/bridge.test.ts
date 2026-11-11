@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Json, ToolInfo } from "../macro/types";
-import type { BackgroundRequest } from "../messages";
 import { ToolNotFoundError } from "../webmcp/adapter";
-import { type ToolAccess, createRequestHandler, isContentRequest, reportTools } from "./bridge";
+import { type ToolAccess, createRequestHandler, isContentRequest } from "./bridge";
 
 const tools: ToolInfo[] = [{ name: "search", description: "Find flights" }];
 
@@ -53,6 +52,22 @@ describe("createRequestHandler", () => {
     expect(executeTool).toHaveBeenCalledWith("search", { to: "LIS" }, expect.any(AbortSignal));
   });
 
+  it("flags a call during which the page started loading another document", async () => {
+    let loads = 4;
+    const executeTool = async (name: string): Promise<Json> => {
+      if (name === "leave") loads++;
+      return null;
+    };
+    const handle = createRequestHandler(fakeAccess({ executeTool }), () => loads);
+    await expect(handle({ type: "execute-tool", name: "leave", args: {} })).resolves.toEqual({
+      ok: true,
+      result: null,
+      navigated: true,
+    });
+    // An earlier load does not mark the next call.
+    await expect(handle({ type: "execute-tool", name: "stay", args: {} })).resolves.toEqual({ ok: true, result: null });
+  });
+
   it("replies with the error instead of rejecting", async () => {
     const handle = createRequestHandler(fakeAccess({ executeTool: () => Promise.reject(new Error("Sold out")) }));
     await expect(handle({ type: "execute-tool", name: "book", args: {} })).resolves.toEqual({
@@ -101,19 +116,5 @@ describe("createRequestHandler", () => {
     handle({ type: "abort-tool" });
     await handle({ type: "execute-tool", name: "b", args: {} });
     expect(signals.map((signal) => signal.aborted)).toEqual([false, false]);
-  });
-});
-
-describe("reportTools", () => {
-  it("sends tools-changed with the current tools and no matches", async () => {
-    const sent: BackgroundRequest[] = [];
-    await reportTools(async () => tools, async (request) => sent.push(request));
-    expect(sent).toEqual([{ type: "tools-changed", tools, matches: 0 }]);
-  });
-
-  it("reports [] when listing fails and swallows a send with no receiver", async () => {
-    const send = vi.fn((_request: BackgroundRequest) => Promise.reject(new Error("No receiving end")));
-    await expect(reportTools(() => Promise.reject(new Error("gone")), send)).resolves.toBeUndefined();
-    expect(send).toHaveBeenCalledWith({ type: "tools-changed", tools: [], matches: 0 });
   });
 });

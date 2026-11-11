@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isMacro, type Expr, type Macro, type Stmt } from "../macro/types";
-import { flightSearchMacro, rocketLauncherMacro, sampleMacros } from "./index";
+import { adventureMacro, flightSearchMacro, rocketLauncherMacro, sampleMacros } from "./index";
 
 /** Every tool alias and input key a program refers to, at any depth. */
 interface References {
@@ -32,6 +32,18 @@ function walkExpr(expr: Expr, refs: References): void {
   } else if ("call" in expr) {
     refs.tools.add(expr.call);
     walkArgs(expr.args, refs);
+  } else if ("callProc" in expr) {
+    walkArgs(expr.args, refs);
+  } else if ("getKey" in expr || "hasKey" in expr) {
+    walkExpr("getKey" in expr ? expr.getKey : expr.hasKey, refs);
+    walkExpr(expr.key, refs);
+  } else if ("contains" in expr) {
+    walkExpr(expr.contains, refs);
+    walkExpr(expr.item, refs);
+  } else if ("length" in expr) {
+    walkExpr(expr.length, refs);
+  } else if ("keys" in expr) {
+    walkExpr(expr.keys, refs);
   } else {
     throw new Error(`Unknown expression: ${JSON.stringify(expr satisfies never)}`);
   }
@@ -76,7 +88,19 @@ function walkStmts(stmts: Stmt[], refs: References): void {
       case "fail":
         walkExpr(stmt.message, refs);
         break;
+      case "setKey":
+        walkExpr(stmt.key, refs);
+        walkExpr(stmt.value, refs);
+        break;
+      case "push":
+        walkExpr(stmt.value, refs);
+        break;
+      case "return":
+        if (stmt.value) walkExpr(stmt.value, refs);
+        break;
       case "wait":
+      case "popFront":
+      case "popBack":
         break;
       default:
         throw new Error(`Unknown statement: ${JSON.stringify(stmt satisfies never)}`);
@@ -127,8 +151,8 @@ describe("references", () => {
 });
 
 describe("sample macros", () => {
-  it("bundles both acceptance macros", () => {
-    expect(sampleMacros).toEqual([rocketLauncherMacro, flightSearchMacro]);
+  it("bundles the acceptance macros", () => {
+    expect(sampleMacros).toEqual([rocketLauncherMacro, flightSearchMacro, adventureMacro]);
   });
 
   it("have unique ids", () => {

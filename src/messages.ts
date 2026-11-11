@@ -14,9 +14,12 @@ export type ContentRequest =
 
 /**
  * The content script's reply to `execute-tool`. It never throws across the
- * channel; `notFound` says the tool is not registered on the page right now.
+ * channel; `notFound` says the tool is not registered on the page right now,
+ * and `navigated` that the call started loading another document.
  */
-export type ExecuteToolResponse = { ok: true; result: Json } | { ok: false; error: string; notFound?: boolean };
+export type ExecuteToolResponse =
+  | { ok: true; result: Json; navigated?: boolean }
+  | { ok: false; error: string; notFound?: boolean };
 
 /** Content script or side panel → background. */
 export type BackgroundRequest =
@@ -65,4 +68,44 @@ export function isRunEvent(message: unknown): message is RunEvent {
     default:
       return false;
   }
+}
+
+/**
+ * Narrows a tool listing from a content script. Only the names are relied on;
+ * the rest comes from the page, which the extension does not control.
+ */
+export function isToolList(value: unknown): value is ToolInfo[] {
+  return Array.isArray(value) && value.every((tool) => isRecord(tool) && typeof tool.name === "string");
+}
+
+function isOptionalTabId(value: unknown): value is number | undefined {
+  return value === undefined || Number.isInteger(value);
+}
+
+/**
+ * Narrows an incoming runtime message to a `BackgroundRequest`. The service
+ * worker hears every message sent in the extension, including from content
+ * scripts in pages it does not control, so check before reading fields.
+ * Extension messages are JSON-serialised, so a record of inputs holds JSON.
+ */
+export function isBackgroundRequest(message: unknown): message is BackgroundRequest {
+  if (!isRecord(message)) return false;
+  switch (message.type) {
+    case "tools-changed":
+      return isToolList(message.tools) && typeof message.matches === "number";
+    case "run-macro":
+      return typeof message.macroId === "string" && isRecord(message.inputs) && isOptionalTabId(message.tabId);
+    case "stop-run":
+      return isOptionalTabId(message.tabId);
+    default:
+      return false;
+  }
+}
+
+/** Narrows the content script's reply to `execute-tool`. */
+export function isExecuteToolResponse(value: unknown): value is ExecuteToolResponse {
+  if (!isRecord(value)) return false;
+  return value.ok === true
+    ? "result" in value && (value.navigated === undefined || typeof value.navigated === "boolean")
+    : value.ok === false && typeof value.error === "string";
 }

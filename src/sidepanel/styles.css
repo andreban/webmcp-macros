@@ -37,3 +37,18 @@ button.secondary { background: transparent; color: var(--fg); border-color: var(
 textarea { width: 100%; font: inherit; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
 .status { overflow-wrap: anywhere; }
 .status.failed { color: var(--danger); }
+.card.row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.run { margin: 0 0 8px; }
+details > summary { cursor: pointer; }
+.tools { list-style: none; padding: 0; }
+.tools > li { padding: 4px 0; border-bottom: 1px solid var(--border); }
+.tools > li:last-child { border-bottom: 0; }
+/* The input form carries only wmm- classes, so each surface styles it. */
+.wmm-form { display: grid; gap: 8px; }
+.wmm-field { display: grid; gap: 2px; }
+.wmm-field > label { font-weight: 600; }
+.wmm-field > input:not([type="checkbox"]), .wmm-field > select { font: inherit; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.wmm-field > input[type="checkbox"] { justify-self: start; }
+.wmm-actions { display: flex; justify-content: flex-end; gap: 6px; }
+button.wmm-secondary { background: transparent; color: var(--fg); border-color: var(--border); }
+.wmm-error { color: var(--danger); margin: 0; }

@@ -3,6 +3,7 @@ import type { Macro } from "../macro/types";
 import { loadMacros, saveMacro } from "../storage";
 import { createNewMacro, type EditorParams, editorPath, historyShortcut, isDirty } from "./page";
 import { ProgramEditor } from "./ProgramEditor";
+import { SitesPanel } from "./SitesPanel";
 import { createEditorState, type EditorAction, editorReducer, type EditorState } from "./state";
 
 type Loaded =
@@ -102,6 +103,7 @@ function EditorSession({ initial, isNew, tabId }: { initial: Macro; isNew: boole
       status={status}
       canSave={!saving && (dirty || !everSaved)}
       onSave={() => void save()}
+      tabId={tabId}
     />
   );
 }
@@ -114,10 +116,12 @@ export interface EditorViewProps {
   status: string;
   canSave: boolean;
   onSave: () => void;
+  /** The tab the macro is edited against, if any. */
+  tabId?: number;
 }
 
 /** The editor's layout, from state passed in, so it renders without `chrome.*`. */
-export function EditorView({ state, dispatch, status, canSave, onSave }: EditorViewProps) {
+export function EditorView({ state, dispatch, status, canSave, onSave, tabId }: EditorViewProps) {
   const { macro } = state;
   return (
     <main className="editor">
@@ -157,6 +161,7 @@ export function EditorView({ state, dispatch, status, canSave, onSave }: EditorV
         onCommit={(text) => dispatch({ type: "setMeta", meta: { description: text || undefined } })}
       />
       {/* Inputs (#34) and sites and trigger (#35) panels go here. */}
+      <SitesPanel macro={macro} dispatch={dispatch} tabId={tabId} />
       <section aria-labelledby="program-heading">
         <h2 id="program-heading">Program</h2>
         <ProgramEditor macro={macro} dispatch={dispatch} />
