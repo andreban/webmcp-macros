@@ -5,3 +5,10 @@
 .field { display: grid; gap: 2px; margin-bottom: 10px; font-weight: 600; }
 .field > input { font: inherit; font-weight: normal; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
 .field > textarea { font-weight: normal; }
+.wmm-program [data-path]:focus-visible { outline: 2px solid var(--wmm-accent); outline-offset: 1px; }
+.wmm-empty { padding: 2px 8px; border: 1px dashed var(--wmm-border); border-radius: 6px; color: var(--muted); font-style: italic; }
+.palette { display: grid; gap: 4px; margin-top: 12px; font-weight: 600; }
+.palette > input { font: inherit; font-weight: normal; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.palette-options { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; font-weight: normal; }
+.palette-options > li { cursor: pointer; }
+.palette-options > [aria-selected="true"] { outline: 2px solid var(--wmm-accent); }
