@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { MACRO_VERSION, type Macro } from "../macro/types";
+import { createDefault, createDefaultExpr, expressions, statements, type ExprKind, type StmtOp } from "../editor/registry";
+import { MACRO_VERSION, type Macro, type Stmt } from "../macro/types";
 import { ProgramView } from "./ProgramView";
 
 // Uses every statement and every expression kind at least once.
@@ -84,6 +85,17 @@ describe("ProgramView", () => {
 
   it("nests bodies inside their block", () => {
     expect(html).toMatch(/<span class="wmm-verb">repeat<\/span>.*?<ol class="wmm-blocks"><li><div[^>]*><span class="wmm-verb">show/);
+  });
+
+  it("renders a default node of every registry entry with the entry's verb", () => {
+    const ops = Object.keys(statements).filter((op): op is StmtOp => op in statements);
+    const kinds = Object.keys(expressions).filter((kind): kind is ExprKind => kind in expressions);
+    const program: Stmt[] = [
+      ...ops.map((op) => createDefault(op)),
+      ...kinds.map((kind): Stmt => ({ op: "message", text: createDefaultExpr(kind) })),
+    ];
+    const markup = renderToStaticMarkup(<ProgramView macro={{ ...macro, program }} />);
+    expect(verbs(markup)).toEqual([...ops.map((op) => statements[op].verb), ...kinds.map(() => "show")]);
   });
 
   it("falls back to the alias and key when they are not declared", () => {

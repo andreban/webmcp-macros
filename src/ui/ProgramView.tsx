@@ -1,11 +1,11 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
+import { type Category, type Slot, type SlotValue, expressions, exprKind, readSlot, statements } from "../editor/registry";
 import type { Expr, Macro, Stmt } from "../macro/types";
 
 /**
- * Read-only block rendering of a macro's program: one component per AST node
- * kind (statement list, statement, expression, argument list), nested the way
- * the program nests. The block editor grows out of this by making the same
- * components editable.
+ * Read-only block rendering of a macro's program, nested the way the program
+ * nests. Blocks and expression pills are generated from the block registry,
+ * so a new statement or expression kind needs only its registry entry.
  *
  * Styles live in `blocks.css`, namespaced under `wmm-`. The component does not
  * import them, so that the on-page launcher can inject them into its shadow
@@ -32,8 +32,6 @@ function Body({ macro, body }: { macro: Macro; body: Stmt[] }) {
   );
 }
 
-type Category = "call" | "control" | "data" | "user";
-
 /** A block always opens with its verb, so colour is never the only cue. */
 function Shell({ category, verb, children }: { category: Category; verb: string; children?: ReactNode }) {
   return (
@@ -44,103 +42,64 @@ function Shell({ category, verb, children }: { category: Category; verb: string;
 }
 
 function Block({ macro, stmt }: { macro: Macro; stmt: Stmt }) {
-  switch (stmt.op) {
-    case "call":
-      return (
-        <Shell category="call" verb="call">
-          <Tool macro={macro} alias={stmt.tool} /> <Args macro={macro} args={stmt.args} />
-          {stmt.saveAs ? <> as <Var name={stmt.saveAs} /></> : null}
-        </Shell>
-      );
-    case "set":
-      return (
-        <Shell category="data" verb="set">
-          <Var name={stmt.var} /> to <Value macro={macro} expr={stmt.value} />
-        </Shell>
-      );
-    case "if":
-      return (
-        <Shell category="control" verb="if">
-          <Value macro={macro} expr={stmt.cond} />
-          <Body macro={macro} body={stmt.then} />
-          {stmt.else ? (
-            <>
-              <span className="wmm-verb">else</span>
-              <Body macro={macro} body={stmt.else} />
-            </>
-          ) : null}
-        </Shell>
-      );
-    case "repeat":
-      return (
-        <Shell category="control" verb="repeat">
-          <Value macro={macro} expr={stmt.times} /> times
-          <Body macro={macro} body={stmt.body} />
-        </Shell>
-      );
-    case "while":
-      return (
-        <Shell category="control" verb="while">
-          <Value macro={macro} expr={stmt.cond} />
-          <Body macro={macro} body={stmt.body} />
-        </Shell>
-      );
-    case "forEach":
-      return (
-        <Shell category="control" verb="for each">
-          <Var name={stmt.var} /> in <Value macro={macro} expr={stmt.list} />
-          <Body macro={macro} body={stmt.body} />
-        </Shell>
-      );
-    case "waitForTool":
-      return (
-        <Shell category="control" verb="wait until">
-          <Tool macro={macro} alias={stmt.tool} /> is available
-          {stmt.timeoutMs === undefined ? null : `, at most ${stmt.timeoutMs} ms`}
-        </Shell>
-      );
-    case "wait":
-      return <Shell category="control" verb="wait">{`${stmt.ms} ms`}</Shell>;
-    case "message":
-      return (
-        <Shell category="user" verb="show">
-          <Value macro={macro} expr={stmt.text} />
-        </Shell>
-      );
-    case "stop":
-      return (
-        <Shell category="control" verb="stop">
-          {stmt.message ? <Value macro={macro} expr={stmt.message} /> : null}
-        </Shell>
-      );
-    case "fail":
-      return (
-        <Shell category="control" verb="fail with">
-          <Value macro={macro} expr={stmt.message} />
-        </Shell>
-      );
-    case "setKey":
-      return (
-        <Shell category="data" verb="set key">
-          <Value macro={macro} expr={stmt.key} /> of <Var name={stmt.var} /> to <Value macro={macro} expr={stmt.value} />
-        </Shell>
-      );
-    case "push":
-      return (
-        <Shell category="data" verb="add">
-          <Value macro={macro} expr={stmt.value} /> to the end of <Var name={stmt.var} />
-        </Shell>
-      );
-    case "popFront":
-    case "popBack":
-      return (
-        <Shell category="data" verb={stmt.op === "popFront" ? "take first of" : "take last of"}>
-          <Var name={stmt.var} />
-          {stmt.saveAs ? <> as <Var name={stmt.saveAs} /></> : null}
-        </Shell>
-      );
+  const { category, verb, label } = statements[stmt.op];
+  return (
+    <Shell category={category} verb={verb}>
+      <Parts macro={macro} node={stmt} label={label} />
+    </Shell>
+  );
+}
+
+/** Renders a registry label: text as is, each slot by its type. */
+function Parts({ macro, node, label }: { macro: Macro; node: Stmt | Expr; label: readonly (string | Slot)[] }) {
+  return label.map((part, index) => {
+    // A label is fixed per kind, so the position is a stable key.
+    if (typeof part === "string") return <Fragment key={index}>{part}</Fragment>;
+    const slot = readSlot(node, part);
+    if (slot === undefined) return null;
+    const prefix = part.prefix === undefined ? null : slot.type === "body" ? <span className="wmm-verb">{part.prefix}</span> : part.prefix;
+    return (
+      <Fragment key={index}>
+        {prefix}
+        <SlotView macro={macro} slot={slot} />
+      </Fragment>
+    );
+  });
+}
+
+function SlotView({ macro, slot }: { macro: Macro; slot: SlotValue }) {
+  switch (slot.type) {
+    case "value":
+      return <Value macro={macro} expr={slot.value} />;
+    case "body":
+      return <Body macro={macro} body={slot.value} />;
+    case "tool":
+      return <Tool macro={macro} alias={slot.value} />;
+    case "var":
+      return <Var name={slot.value} />;
+    case "input": {
+      // The label, not the key: the key is a macro-internal name.
+      const label = macro.inputs?.find((input) => input.key === slot.value)?.label ?? slot.value;
+      return <span className="wmm-pill wmm-pill--input">{label}</span>;
+    }
+    case "ms":
+      return `${slot.value} ms`;
+    case "args":
+      return <Args macro={macro} args={slot.value} />;
+    case "items":
+      return slot.value.map((item, index) => (
+        <span key={index} className="wmm-item">
+          <Value macro={macro} expr={item} />
+        </span>
+      ));
+    case "path":
+      return slot.value.join(".");
+    case "literal":
+      return <span className="wmm-pill wmm-pill--lit">{JSON.stringify(slot.value)}</span>;
+    case "binOp":
+      return slot.value;
     default:
-      throw new Error(`Unknown statement: ${JSON.stringify(stmt satisfies never)}`);
+      throw new Error(`Unknown slot: ${JSON.stringify(slot satisfies never)}`);
   }
 }
 
@@ -167,72 +126,10 @@ function Args({ macro, args }: { macro: Macro; args?: Record<string, Expr> | und
   );
 }
 
-/**
- * `Expr` variants are told apart by their single key, so this narrows with
- * `in` checks; the final `never` makes a new variant fail the build here.
- */
 function Value({ macro, expr }: { macro: Macro; expr: Expr }) {
-  if ("lit" in expr) return <span className="wmm-pill wmm-pill--lit">{JSON.stringify(expr.lit)}</span>;
-  if ("input" in expr) {
-    // The label, not the key: the key is a macro-internal name.
-    const label = macro.inputs?.find((input) => input.key === expr.input)?.label ?? expr.input;
-    return <span className="wmm-pill wmm-pill--input">{label}</span>;
-  }
-  if ("var" in expr) return <Var name={expr.var} />;
-  if ("get" in expr) return <Pill>{expr.path.join(".")} of <Value macro={macro} expr={expr.get} /></Pill>;
-  if ("bin" in expr) {
-    return (
-      <Pill>
-        <Value macro={macro} expr={expr.left} /> {expr.bin} <Value macro={macro} expr={expr.right} />
-      </Pill>
-    );
-  }
-  if ("not" in expr) return <Pill>not <Value macro={macro} expr={expr.not} /></Pill>;
-  if ("obj" in expr) return <Pill>{"{ "}<Args macro={macro} args={expr.obj} />{" }"}</Pill>;
-  if ("list" in expr) {
-    return (
-      <Pill>
-        {"list "}
-        {expr.list.map((item, index) => (
-          <span key={index} className="wmm-item">
-            <Value macro={macro} expr={item} />
-          </span>
-        ))}
-      </Pill>
-    );
-  }
-  if ("toolAvailable" in expr) return <Pill><Tool macro={macro} alias={expr.toolAvailable} /> available?</Pill>;
-  if ("call" in expr) {
-    return (
-      <Pill>
-        result of <Tool macro={macro} alias={expr.call} /> <Args macro={macro} args={expr.args} />
-      </Pill>
-    );
-  }
-  if ("getKey" in expr) {
-    return (
-      <Pill>
-        <Value macro={macro} expr={expr.key} /> of <Value macro={macro} expr={expr.getKey} />
-      </Pill>
-    );
-  }
-  if ("hasKey" in expr) {
-    return (
-      <Pill>
-        <Value macro={macro} expr={expr.hasKey} /> has <Value macro={macro} expr={expr.key} />?
-      </Pill>
-    );
-  }
-  if ("length" in expr) return <Pill>length of <Value macro={macro} expr={expr.length} /></Pill>;
-  if ("contains" in expr) {
-    return (
-      <Pill>
-        <Value macro={macro} expr={expr.contains} /> contains <Value macro={macro} expr={expr.item} />?
-      </Pill>
-    );
-  }
-  if ("keys" in expr) return <Pill>keys of <Value macro={macro} expr={expr.keys} /></Pill>;
-  throw new Error(`Unknown expression: ${JSON.stringify(expr satisfies never)}`);
+  const { label, bare } = expressions[exprKind(expr)];
+  const parts = <Parts macro={macro} node={expr} label={label} />;
+  return bare ? parts : <Pill>{parts}</Pill>;
 }
 
 function Pill({ children }: { children: ReactNode }) {
