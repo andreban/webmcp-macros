@@ -94,6 +94,7 @@ describe("executeTool", () => {
   it.each([
     ["undefined", undefined, null],
     ["null", null, null],
+    ['"undefined" text, which Chrome 153 returns for a tool without a result', "undefined", null],
     ["JSON text", '{"ok":true}', { ok: true }],
     ["plain text", "done", "done"],
     ["an object with non-JSON parts", { n: 1, f: () => 1, d: new Date(0) }, { n: 1, d: "1970-01-01T00:00:00.000Z" }],

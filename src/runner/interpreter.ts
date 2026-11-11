@@ -109,7 +109,9 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
   const waitFor = async (name: string, timeoutMs: number): Promise<void> => {
     try {
       await host.waitForTool(name, timeoutMs);
-    } catch {
+    } catch (error: unknown) {
+      // A host that knows why the tool is missing says so with a MacroRunError.
+      if (error instanceof MacroRunError) throw error;
       throw new MacroRunError(`Tool "${name}" never became available.`);
     }
   };

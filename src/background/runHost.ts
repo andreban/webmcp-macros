@@ -5,7 +5,7 @@
  */
 import { isExecuteToolResponse, isToolList, type ContentRequest, type RunEvent } from "../messages";
 import type { Json, Macro, ToolInfo } from "../macro/types";
-import { runMacro, type RunResult, type ToolHost } from "../runner/interpreter";
+import { MacroRunError, runMacro, type RunResult, type ToolHost } from "../runner/interpreter";
 
 export interface RunHostDeps {
   /** Sends to the tab's top-frame content script; rejects when no listener answers. */
@@ -29,57 +29,91 @@ export interface RunHost {
 }
 
 const DEFAULT_POLL_MS = 500;
+/** How long `isToolAvailable` waits for a newly loaded page to report its tools. */
+const DEFAULT_REPORT_TIMEOUT_MS = 10_000;
 
 export function createRunHost(deps: RunHostDeps): RunHost {
   const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
   const toolsByTab = new Map<number, string[]>();
   const waitersByTab = new Map<number, Set<() => void>>();
   const activeRuns = new Map<number, AbortController>();
+  // Tabs whose last tool call loaded another document. Until that document's
+  // content script sends `tools-changed`, the old page may still answer
+  // `list-tools` while it unloads, so neither its answers nor the cache count.
+  const awaitingReport = new Set<number>();
 
   const setTools = (tabId: number, tools: ToolInfo[]): void => {
+    awaitingReport.delete(tabId);
     toolsByTab.set(tabId, tools.map((tool) => tool.name));
     for (const wake of waitersByTab.get(tabId) ?? []) wake();
   };
 
-  const refreshTools = async (tabId: number): Promise<string[]> => {
+  const refreshTools = async (tabId: number): Promise<void> => {
+    if (awaitingReport.has(tabId)) return;
     try {
       const tools = await deps.sendToTab(tabId, { type: "list-tools" });
-      if (isToolList(tools)) setTools(tabId, tools);
+      // A navigation may have started while the listing was in flight.
+      if (isToolList(tools) && !awaitingReport.has(tabId)) setTools(tabId, tools);
     } catch {
       // No content script yet (the page is still loading): keep the cache.
     }
-    return toolsByTab.get(tabId) ?? [];
   };
+
+  const navigated = (tabId: number): null => {
+    toolsByTab.delete(tabId);
+    awaitingReport.add(tabId);
+    return null;
+  };
+
+  const hasTool = (tabId: number, name: string): boolean =>
+    !awaitingReport.has(tabId) && (toolsByTab.get(tabId)?.includes(name) ?? false);
+
+  /**
+   * Resolves `true` once `ready()` holds, re-checked on every report and poll,
+   * or `false` after `timeoutMs`. Rejects when the run is aborted.
+   */
+  const until = (tabId: number, ready: () => boolean, timeoutMs: number, signal: AbortSignal): Promise<boolean> =>
+    new Promise((resolve, reject) => {
+      const waiters = waitersByTab.get(tabId) ?? new Set();
+      waitersByTab.set(tabId, waiters);
+      const finish = (settle: () => void) => {
+        clearTimeout(timer);
+        clearInterval(poll);
+        waiters.delete(check);
+        signal.removeEventListener("abort", onAbort);
+        settle();
+      };
+      const check = () => {
+        if (ready()) finish(() => resolve(true));
+      };
+      const onAbort = () => finish(() => reject(new Error("Aborted.")));
+      if (signal.aborted) return onAbort();
+      const timer = setTimeout(() => finish(() => resolve(false)), timeoutMs);
+      // `tools-changed` normally wakes the waiter; the poll covers tools that
+      // changed without a report reaching us.
+      const poll = setInterval(() => void refreshTools(tabId).then(check), pollMs);
+      waiters.add(check);
+      signal.addEventListener("abort", onAbort);
+      void refreshTools(tabId).then(check);
+    });
 
   const toolHost = (tabId: number, signal: AbortSignal): ToolHost => ({
     async isToolAvailable(name) {
-      return (await refreshTools(tabId)).includes(name);
+      if (awaitingReport.has(tabId)) {
+        await until(tabId, () => !awaitingReport.has(tabId), DEFAULT_REPORT_TIMEOUT_MS, signal);
+      }
+      await refreshTools(tabId);
+      return hasTool(tabId, name);
     },
 
     async waitForTool(name, timeoutMs) {
-      if ((await refreshTools(tabId)).includes(name)) return;
-      await new Promise<void>((resolve, reject) => {
-        const waiters = waitersByTab.get(tabId) ?? new Set();
-        waitersByTab.set(tabId, waiters);
-        const finish = (settle: () => void) => {
-          clearTimeout(timer);
-          clearInterval(poll);
-          waiters.delete(check);
-          signal.removeEventListener("abort", onAbort);
-          settle();
-        };
-        const check = () => {
-          if (toolsByTab.get(tabId)?.includes(name)) finish(resolve);
-        };
-        const onAbort = () => finish(() => reject(new Error("Aborted.")));
-        if (signal.aborted) return onAbort();
-        const timer = setTimeout(() => finish(() => reject(new Error(`Timed out waiting for "${name}".`))), timeoutMs);
-        // `tools-changed` normally wakes the waiter; the poll covers a reloaded
-        // page whose content script has not reported in yet.
-        const poll = setInterval(() => void refreshTools(tabId).then(check), pollMs);
-        waiters.add(check);
-        signal.addEventListener("abort", onAbort);
-      });
+      if (await until(tabId, () => hasTool(tabId, name), timeoutMs, signal)) return;
+      // A MacroRunError's message becomes the run's failure message.
+      throw new MacroRunError(
+        awaitingReport.has(tabId)
+          ? `The tab navigated and the new page did not report its tools within ${timeoutMs} ms (it may not support WebMCP).`
+          : `Timed out waiting for "${name}".`,
+      );
     },
 
     async callTool(name, args) {
@@ -87,15 +121,14 @@ export function createRunHost(deps: RunHostDeps): RunHost {
       try {
         response = await deps.sendToTab(tabId, { type: "execute-tool", name, args });
       } catch {
-        // The channel closed mid-call: the tool navigated the page, which the
-        // runner treats as a null result. The new page reports its own tools.
-        toolsByTab.delete(tabId);
-        return null;
+        // The channel closed mid-call: the page unloaded under the tool.
+        return navigated(tabId);
       }
       if (response === undefined) return null;
       if (!isExecuteToolResponse(response)) throw new Error(`Invalid response from tool "${name}".`);
       if (!response.ok) throw new Error(response.error);
-      return response.result;
+      // Whatever the tool returned, a call that loads another page is null to the macro.
+      return response.navigated ? navigated(tabId) : response.result;
     },
   });
 
@@ -133,6 +166,7 @@ export function createRunHost(deps: RunHostDeps): RunHost {
       activeRuns.get(tabId)?.abort();
       toolsByTab.delete(tabId);
       waitersByTab.delete(tabId);
+      awaitingReport.delete(tabId);
     },
     toolHost,
   };

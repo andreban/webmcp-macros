@@ -108,17 +108,106 @@ describe("callTool", () => {
     await expect(host.toolHost(TAB, new AbortController().signal).callTool("go", {})).rejects.toThrow("Invalid response");
   });
 
-  it("treats a closed channel as a navigation: null, and the tab's cache is dropped", async () => {
-    const { host, sendToTab } = setup([], async () => {
-      throw new Error("The message port closed before a response was received.");
-    });
-    host.setTools(TAB, [{ name: "go" }]);
-    sendToTab.mockRejectedValueOnce(new Error("closed"));
+});
+
+describe("navigation", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const closedChannel = async () => {
+    throw new Error("The message port closed before a response was received.");
+  };
+
+  it("treats a closed channel as a navigation and waits for the new page's report, not the old page's listing", async () => {
+    const { host, tools, requests } = setup([], closedChannel);
+    // The old page still answers list-tools with the tool while it unloads.
+    tools.push("go");
     const toolHost = host.toolHost(TAB, new AbortController().signal);
     await expect(toolHost.callTool("go", {})).resolves.toBeNull();
-    // The next listing also fails (new page not ready), so only the cache answers.
-    sendToTab.mockRejectedValueOnce(new Error("no receiver"));
-    await expect(toolHost.isToolAvailable("go")).resolves.toBe(false);
+    let found = false;
+    const waiting = toolHost.waitForTool("go", 5000).then(() => (found = true));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(found).toBe(false);
+    expect(requests.filter((request) => request.type === "list-tools")).toHaveLength(0);
+    host.setTools(TAB, [{ name: "go" }]);
+    await waiting;
+  });
+
+  it("returns null for a call the page reports as navigated, whatever its result", async () => {
+    const { host } = setup([], async () => ({ ok: true, result: "bye", navigated: true }));
+    const toolHost = host.toolHost(TAB, new AbortController().signal);
+    await expect(toolHost.callTool("go", {})).resolves.toBeNull();
+    const waiting = toolHost.waitForTool("next", 5000);
+    host.setTools(TAB, [{ name: "next" }]);
+    await expect(waiting).resolves.toBeUndefined();
+  });
+
+  it("does not wait after a call that stayed on the page", async () => {
+    const { host, tools } = setup([], async () => ({ ok: true, result: null }));
+    tools.push("next");
+    const toolHost = host.toolHost(TAB, new AbortController().signal);
+    await expect(toolHost.callTool("go", {})).resolves.toBeNull();
+    await expect(toolHost.waitForTool("next", 5000)).resolves.toBeUndefined();
+  });
+
+  it("fails with a clear message when no new page reports in before the timeout", async () => {
+    const { host } = setup([], closedChannel);
+    const toolHost = host.toolHost(TAB, new AbortController().signal);
+    await toolHost.callTool("go", {});
+    const assertion = expect(toolHost.waitForTool("next", 3000)).rejects.toThrow(
+      "The tab navigated and the new page did not report its tools within 3000 ms",
+    );
+    await vi.advanceTimersByTimeAsync(3000);
+    await assertion;
+  });
+
+  it("answers isToolAvailable from the new page's report, or false when none comes", async () => {
+    const { host, tools } = setup([], closedChannel);
+    const toolHost = host.toolHost(TAB, new AbortController().signal);
+    await toolHost.callTool("go", {});
+    const available = toolHost.isToolAvailable("next");
+    tools.push("next");
+    host.setTools(TAB, [{ name: "next" }]);
+    await expect(available).resolves.toBe(true);
+
+    await toolHost.callTool("go", {});
+    const gone = toolHost.isToolAvailable("next");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(gone).resolves.toBe(false);
+  });
+
+  it("runs a macro across a navigation: the macro sees null and continues on the new page", async () => {
+    const program: Stmt[] = [
+      { op: "call", tool: "go", saveAs: "left" },
+      { op: "call", tool: "go", saveAs: "arrived" },
+    ];
+    let calls = 0;
+    const { host, tools, events } = setup([macro(program)], async () =>
+      ++calls === 1 ? { ok: true, result: null, navigated: true } : { ok: true, result: "B" },
+    );
+    tools.push("go");
+    const run = host.startRun(TAB, "m", {});
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toBe(1);
+    host.setTools(TAB, [{ name: "go" }]);
+    await run;
+    expect(events.at(-1)).toMatchObject({
+      type: "run-finished",
+      result: { status: "done", toolCalls: 2, vars: { left: null, arrived: "B" } },
+    });
+  });
+
+  it("fails the run with the navigation message when the new page never reports", async () => {
+    const program: Stmt[] = [{ op: "call", tool: "go" }, { op: "call", tool: "go" }];
+    const { host, tools, events } = setup([macro(program)], async () => ({ ok: true, result: null, navigated: true }));
+    tools.push("go");
+    const run = host.startRun(TAB, "m", {});
+    await vi.advanceTimersByTimeAsync(10_000);
+    await run;
+    expect(events.at(-1)).toMatchObject({
+      type: "run-finished",
+      result: { status: "failed", message: expect.stringContaining("did not report its tools"), toolCalls: 1 },
+    });
   });
 });
 
