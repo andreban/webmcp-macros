@@ -8,6 +8,7 @@ import type { Json, Macro, ToolInfo } from "../macro/types";
 import { MacroRunError, startRun as initialState, step, type RunResult, type ToolHost } from "../runner/interpreter";
 import type { RunState } from "../runner/machine";
 import type { RunStore } from "./runStore";
+import { createSiteRouter, type TabRouterDeps } from "./tabRouter";
 
 export interface RunHostDeps {
   /** Sends to the tab's top-frame content script; rejects when no listener answers. */
@@ -19,6 +20,8 @@ export interface RunHostDeps {
   store?: Pick<RunStore, "save" | "remove">;
   /** How often `waitForTool` re-lists tools, in milliseconds. */
   pollMs?: number;
+  /** Finds and opens tabs for a macro's other sites; without it every site runs on the run's tab. */
+  tabs?: TabRouterDeps;
 }
 
 export interface RunHost {
@@ -31,7 +34,14 @@ export interface RunHost {
   stopRun(tabId: number): void;
   /** Aborts the tab's run and forgets its tools. */
   removeTab(tabId: number): void;
-  toolHost(tabId: number, signal: AbortSignal): ToolHost;
+  toolHost(tabId: number, signal: AbortSignal): TabTools;
+}
+
+/** The tool methods of a `ToolHost`, bound to one tab, so without a site. */
+export interface TabTools {
+  callTool(name: string, args: Record<string, Json>): Promise<Json>;
+  isToolAvailable(name: string): Promise<boolean>;
+  waitForTool(name: string, timeoutMs: number): Promise<void>;
 }
 
 const DEFAULT_POLL_MS = 500;
@@ -43,6 +53,9 @@ export function createRunHost(deps: RunHostDeps): RunHost {
   const toolsByTab = new Map<number, string[]>();
   const waitersByTab = new Map<number, Set<() => void>>();
   const activeRuns = new Map<number, AbortController>();
+  // The tabs each run has called tools on, keyed by the run's own tab, so
+  // Stop reaches a call in flight on another site's tab too.
+  const runTabs = new Map<number, Set<number>>();
   // Tabs whose last tool call loaded another document. Until that document's
   // content script sends `tools-changed`, the old page may still answer
   // `list-tools` while it unloads, so neither its answers nor the cache count.
@@ -103,7 +116,7 @@ export function createRunHost(deps: RunHostDeps): RunHost {
       void refreshTools(tabId).then(check);
     });
 
-  const toolHost = (tabId: number, signal: AbortSignal): ToolHost => ({
+  const toolHost = (tabId: number, signal: AbortSignal): TabTools => ({
     async isToolAvailable(name) {
       if (awaitingReport.has(tabId)) {
         await until(tabId, () => !awaitingReport.has(tabId), DEFAULT_REPORT_TIMEOUT_MS, signal);
@@ -154,14 +167,23 @@ export function createRunHost(deps: RunHostDeps): RunHost {
       if (!loaded) return finished({ status: "failed", message: "Macro not found.", toolCalls: 0, vars: {} });
       let state = loaded;
       let inFlight: string[] = [];
-      const tabHost = toolHost(tabId, controller.signal);
+      const route = deps.tabs ? createSiteRouter(deps.tabs, loaded.macro, tabId) : async () => tabId;
+      const used = new Set([tabId]);
+      runTabs.set(tabId, used);
+      const tabTools = async (site: string): Promise<TabTools> => {
+        const id = await route(site);
+        used.add(id);
+        return toolHost(id, controller.signal);
+      };
       const host: ToolHost = {
-        ...tabHost,
-        async callTool(name, args) {
+        isToolAvailable: async (name, site) => (await tabTools(site)).isToolAvailable(name),
+        waitForTool: async (name, timeoutMs, site) => (await tabTools(site)).waitForTool(name, timeoutMs),
+        async callTool(name, args, site) {
+          const tools = await tabTools(site);
           inFlight = [...inFlight, name];
           // `state` is still the one before this step: a resume repeats the step.
           await deps.store?.save(tabId, state, inFlight);
-          return tabHost.callTool(name, args);
+          return tools.callTool(name, args);
         },
         onStep: ({ count, tool }) => deps.broadcast({ type: "run-step", tabId, macroId, count, tool }),
         message: (text) => deps.broadcast({ type: "run-message", tabId, macroId, text }),
@@ -179,6 +201,7 @@ export function createRunHost(deps: RunHostDeps): RunHost {
       finished({ status: "failed", message: error instanceof Error ? error.message : String(error), toolCalls: 0, vars: {} });
     } finally {
       activeRuns.delete(tabId);
+      runTabs.delete(tabId);
       await deps.store?.remove(tabId).catch(() => {});
     }
   };
@@ -196,7 +219,7 @@ export function createRunHost(deps: RunHostDeps): RunHost {
     stopRun(tabId) {
       activeRuns.get(tabId)?.abort();
       // Also cancel a tool call in flight, which the signal cannot reach.
-      deps.sendToTab(tabId, { type: "abort-tool" }).catch(() => {});
+      for (const id of runTabs.get(tabId) ?? [tabId]) deps.sendToTab(id, { type: "abort-tool" }).catch(() => {});
     },
     removeTab(tabId) {
       activeRuns.get(tabId)?.abort();

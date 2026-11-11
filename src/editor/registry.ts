@@ -15,6 +15,8 @@ export interface SlotValues {
   body: Stmt[];
   /** A key into `Macro.tools`. */
   tool: string;
+  /** A key into `Macro.sites`. */
+  site: string;
   var: string;
   /** A key into `Macro.inputs`. */
   input: string;
@@ -194,6 +196,12 @@ export const statements: { [O in StmtOp]: StmtDef<StmtOf<O>> } = {
     verb: "return",
     label: [{ slot: "value", type: "value" }],
     create: () => ({ op: "return" }),
+  },
+  onSite: {
+    category: "control",
+    verb: "on site",
+    label: [{ slot: "site", type: "site" }, { slot: "body", type: "body" }],
+    create: () => ({ op: "onSite", site: "", body: [] }),
   },
 };
 
