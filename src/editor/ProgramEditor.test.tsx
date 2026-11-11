@@ -16,6 +16,14 @@ describe("ProgramEditor", () => {
     expect(html).toContain('role="combobox"');
   });
 
+  it("renders each block's slots as editable controls", () => {
+    const macro = { ...rocketLauncherMacro, program: [{ op: "set" as const, var: "n", value: { lit: 2 } }, { op: "wait" as const, ms: 10 }] };
+    const html = renderToStaticMarkup(<ProgramEditor macro={macro} dispatch={() => {}} />);
+    expect(html).toMatch(/aria-label="variable"[^>]* value="n"/);
+    expect(html).toContain('aria-label="Change value"');
+    expect(html).toMatch(/aria-label="milliseconds"[^>]* value="10"/);
+  });
+
   it("offers an empty program as a place to insert", () => {
     const html = renderToStaticMarkup(<ProgramEditor macro={{ ...rocketLauncherMacro, program: [] }} dispatch={() => {}} />);
     expect(html).toMatch(/<div class="wmm-empty" data-path="\[&quot;program&quot;,0\]" tabindex="0"[^>]*>empty<\/div>/);
