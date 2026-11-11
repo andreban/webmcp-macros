@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveRelativeDate } from "../macro/relativeDate";
 import { MACRO_VERSION, type Macro, type MacroInput } from "../macro/types";
 import { flightSearchMacro as flightSearch } from "../samples/flightSearch";
 import { coerceValues, fieldFor, fillFromPreset, initialValues, InputFormView, presetValues } from "./InputForm";
@@ -97,6 +98,35 @@ describe("presets in the form", () => {
   });
 });
 
+describe("relative dates in the form", () => {
+  const inputs: MacroInput[] = [
+    { key: "out", label: "Out", schema: { type: "string", format: "date" }, default: "today+14d" },
+    { key: "fixed", label: "Fixed", schema: { type: "string", format: "date" }, default: "2026-12-24" },
+    { key: "text", label: "Text", schema: { type: "string" }, default: "today+1d" },
+  ];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 0, 31, 12));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("resolves relative date defaults when the form opens and leaves other values alone", () => {
+    expect(initialValues(inputs, {})).toEqual({ out: "2026-02-14", fixed: "2026-12-24", text: "today+1d" });
+  });
+
+  it("resolves a relative date held by a preset", () => {
+    const current = { out: "2026-02-14", fixed: "2026-12-24", text: "x" };
+    expect(fillFromPreset(inputs, current, { out: "today+1m", fixed: "today" })).toEqual({
+      out: "2026-02-28",
+      fixed: "2026-01-31",
+      text: "x",
+    });
+  });
+});
+
 describe("InputFormView", () => {
   const macro: Macro = {
     ...flightSearch,
@@ -128,7 +158,8 @@ describe("InputFormView", () => {
     expect(html).toContain('<option value="">Choose…</option>');
     expect(html).toContain('<option value="Up to 1 stop" selected="">');
     expect(control("Passengers")).toMatchObject({ type: "number", value: "1", min: "1", step: "any", required: "" });
-    expect(control("Depart")).toMatchObject({ type: "date", value: "", required: "" });
+    expect(control("Depart")).toMatchObject({ type: "date", value: resolveRelativeDate("today+14d"), required: "" });
+    expect(control("Return")).toMatchObject({ type: "date", value: resolveRelativeDate("today+21d") });
     expect(control("To (IATA)")).toMatchObject({ type: "text", value: "NYC", pattern: "^[A-Z]{3}$", required: "" });
     expect(control("Flexible dates")).toMatchObject({ type: "checkbox" });
     expect(control("Flexible dates")).not.toHaveProperty("required");
