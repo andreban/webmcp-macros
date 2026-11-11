@@ -522,3 +522,328 @@ describe("expressions", () => {
     expect(o !== null && typeof o === "object" && Object.hasOwn(o, "__proto__")).toBe(true);
   });
 });
+
+describe("data operations", () => {
+  /** Runs the program and returns the failure message. */
+  async function failure(program: Stmt[]): Promise<string | undefined> {
+    const result = await runMacro(macro(program), fakeHost().host);
+    expect(result.status).toBe("failed");
+    return result.message;
+  }
+
+  const dict = lit({ a: 1, b: { c: 2 } });
+
+  it("reads keys and list items, with null when missing", async () => {
+    expect(await evaluate({ getKey: dict, key: { bin: "+", left: lit("b"), right: lit("") } })).toEqual({ c: 2 });
+    expect(await evaluate({ getKey: dict, key: lit("z") })).toBeNull();
+    expect(await evaluate({ getKey: dict, key: lit("constructor") })).toBeNull();
+    expect(await evaluate({ getKey: lit(["x", "y"]), key: lit(1) })).toBe("y");
+    expect(await evaluate({ getKey: lit(["x", "y"]), key: lit(2) })).toBeNull();
+  });
+
+  it("tells whether a key or index exists", async () => {
+    expect(await evaluate({ hasKey: dict, key: lit("a") })).toBe(true);
+    expect(await evaluate({ hasKey: dict, key: lit("toString") })).toBe(false);
+    expect(await evaluate({ hasKey: lit([null]), key: lit(0) })).toBe(true);
+    expect(await evaluate({ hasKey: lit([null]), key: lit(-1) })).toBe(false);
+  });
+
+  it("measures lists, strings and dictionaries", async () => {
+    expect(await evaluate({ length: lit([1, 2, 3]) })).toBe(3);
+    expect(await evaluate({ length: lit("abcd") })).toBe(4);
+    expect(await evaluate({ length: dict })).toBe(2);
+  });
+
+  it("finds equal items in lists and substrings in strings", async () => {
+    expect(await evaluate({ contains: lit([1, { x: [2] }]), item: lit({ x: [2] }) })).toBe(true);
+    expect(await evaluate({ contains: lit([1, 2]), item: lit("1") })).toBe(false);
+    expect(await evaluate({ contains: lit("north,east"), item: lit("east") })).toBe(true);
+  });
+
+  it("lists a dictionary's keys", async () => {
+    expect(await evaluate({ keys: dict })).toEqual(["a", "b"]);
+  });
+
+  it("fails expressions on the wrong type with a clear message", async () => {
+    const set = (value: Expr): Stmt[] => [{ op: "set", var: "x", value }];
+    expect(await failure(set({ getKey: lit(5), key: lit("a") }))).toBe("getKey needs a dictionary or a list, got a number.");
+    expect(await failure(set({ getKey: dict, key: lit(1) }))).toBe("getKey on a dictionary needs a string key, got a number.");
+    expect(await failure(set({ hasKey: lit([]), key: lit("0") }))).toBe("hasKey on a list needs an integer index, got a string.");
+    expect(await failure(set({ hasKey: lit([]), key: lit(0.5) }))).toBe("hasKey on a list needs an integer index, got a number.");
+    expect(await failure(set({ length: lit(null) }))).toBe("length needs a list, a string or a dictionary, got null.");
+    expect(await failure(set({ contains: dict, item: lit("a") }))).toBe("contains needs a list or a string, got a dictionary.");
+    expect(await failure(set({ contains: lit("abc"), item: lit(1) }))).toBe("contains on a string needs a string, got a number.");
+    expect(await failure(set({ keys: lit([1]) }))).toBe("keys needs a dictionary, got a list.");
+  });
+
+  it("sets keys, pushes and pops without changing shared values", async () => {
+    const program: Stmt[] = [
+      { op: "set", var: "d", value: lit({ a: 1 }) },
+      { op: "set", var: "alias", value: v("d") },
+      { op: "setKey", var: "d", key: lit("a"), value: lit(2) },
+      { op: "setKey", var: "d", key: lit("__proto__"), value: lit(3) },
+      { op: "set", var: "q", value: lit([1, 2, 3]) },
+      { op: "set", var: "qAlias", value: v("q") },
+      { op: "push", var: "q", value: lit(4) },
+      { op: "popFront", var: "q", saveAs: "first" },
+      { op: "popBack", var: "q", saveAs: "last" },
+      { op: "popBack", var: "q" },
+    ];
+    const run = () => runMacro(macro(program), fakeHost().host);
+    const result = await run();
+    expect(result).toMatchObject({ status: "done", vars: { alias: { a: 1 }, q: [2], qAlias: [1, 2, 3], first: 1, last: 4 } });
+    const d = result.vars.d;
+    expect(d !== null && typeof d === "object" && !Array.isArray(d) && Object.hasOwn(d, "__proto__")).toBe(true);
+    expect(JSON.stringify(d)).toBe('{"a":2,"__proto__":3}');
+    // The literals in the program are untouched, so a second run starts the same.
+    expect((await run()).vars).toEqual(result.vars);
+  });
+
+  it("fails data statements on the wrong type, an unset variable or an empty list", async () => {
+    const withVar = (value: Json, stmt: Stmt): Stmt[] => [{ op: "set", var: "x", value: lit(value) }, stmt];
+    expect(await failure(withVar([], { op: "setKey", var: "x", key: lit("a"), value: lit(1) }))).toBe(
+      'setKey needs a dictionary in "x", got a list.',
+    );
+    expect(await failure(withVar({}, { op: "setKey", var: "x", key: lit(1), value: lit(1) }))).toBe(
+      "setKey needs a string key, got a number.",
+    );
+    expect(await failure(withVar({}, { op: "push", var: "x", value: lit(1) }))).toBe('push needs a list in "x", got a dictionary.');
+    expect(await failure(withVar("ab", { op: "popFront", var: "x" }))).toBe('popFront needs a list in "x", got a string.');
+    expect(await failure(withVar([], { op: "popBack", var: "x" }))).toBe('popBack needs a non-empty list; "x" is empty.');
+    expect(await failure([{ op: "push", var: "nope", value: lit(1) }])).toBe('Variable "nope" is not set.');
+  });
+
+  // A small maze as the maze macro would record it: each cell maps to the
+  // cells reachable from it. Dead end at 2,0; exit at 2,2.
+  const grid = lit({
+    "0,0": ["1,0"],
+    "1,0": ["0,0", "2,0", "1,1"],
+    "2,0": ["1,0"],
+    "1,1": ["1,0", "1,2"],
+    "1,2": ["1,1", "2,2"],
+    "2,2": ["1,2"],
+  });
+
+  it("expresses a breadth-first search for the shortest path", async () => {
+    const program: Stmt[] = [
+      { op: "set", var: "grid", value: grid },
+      { op: "set", var: "prev", value: lit({ "0,0": null }) },
+      { op: "set", var: "queue", value: lit(["0,0"]) },
+      {
+        op: "while",
+        cond: { bin: ">", left: { length: v("queue") }, right: lit(0) },
+        body: [
+          { op: "popFront", var: "queue", saveAs: "cell" },
+          {
+            op: "forEach",
+            list: { getKey: v("grid"), key: v("cell") },
+            var: "next",
+            body: [
+              {
+                op: "if",
+                cond: { not: { hasKey: v("prev"), key: v("next") } },
+                then: [
+                  { op: "setKey", var: "prev", key: v("next"), value: v("cell") },
+                  { op: "push", var: "queue", value: v("next") },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      // Walk back from the exit to build the path.
+      { op: "set", var: "path", value: lit([]) },
+      { op: "set", var: "at", value: lit("2,2") },
+      {
+        op: "while",
+        cond: { bin: "!=", left: v("at"), right: lit(null) },
+        body: [
+          { op: "push", var: "path", value: v("at") },
+          { op: "set", var: "at", value: { getKey: v("prev"), key: v("at") } },
+        ],
+      },
+    ];
+    const result = await runMacro(macro(program), fakeHost().host);
+    expect(result).toMatchObject({ status: "done", vars: { path: ["2,2", "1,2", "1,1", "1,0", "0,0"] } });
+  });
+
+  it("expresses a depth-first search with a visited set and a stack", async () => {
+    const program: Stmt[] = [
+      { op: "set", var: "grid", value: grid },
+      { op: "set", var: "visited", value: lit({}) },
+      { op: "set", var: "order", value: lit([]) },
+      { op: "set", var: "stack", value: lit(["0,0"]) },
+      {
+        op: "while",
+        cond: { bin: ">", left: { length: v("stack") }, right: lit(0) },
+        body: [
+          { op: "popBack", var: "stack", saveAs: "cell" },
+          {
+            op: "if",
+            cond: { not: { contains: { keys: v("visited") }, item: v("cell") } },
+            then: [
+              { op: "setKey", var: "visited", key: v("cell"), value: lit(true) },
+              { op: "push", var: "order", value: v("cell") },
+              {
+                op: "forEach",
+                list: { getKey: v("grid"), key: v("cell") },
+                var: "next",
+                body: [{ op: "push", var: "stack", value: v("next") }],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const result = await runMacro(macro(program), fakeHost().host);
+    expect(result).toMatchObject({ status: "done", vars: { order: ["0,0", "1,0", "1,1", "1,2", "2,2", "2,0"] } });
+  });
+});
+
+describe("procedures", () => {
+  const n = v("n");
+  const withProcs = (program: Stmt[], procedures: Macro["procedures"], tools: Macro["tools"] = {}): Macro => ({
+    ...macro(program, tools),
+    procedures,
+  });
+  const factorial: Macro["procedures"] = {
+    fact: {
+      params: ["n"],
+      body: [
+        { op: "if", cond: { bin: "<=", left: n, right: lit(1) }, then: [{ op: "return", value: lit(1) }] },
+        {
+          op: "return",
+          value: { bin: "*", left: n, right: { callProc: "fact", args: { n: { bin: "-", left: n, right: lit(1) } } } },
+        },
+      ],
+    },
+  };
+
+  it("returns a value to the expression that called it", async () => {
+    const procs: Macro["procedures"] = {
+      double: { params: ["x"], body: [{ op: "return", value: { bin: "*", left: v("x"), right: lit(2) } }] },
+    };
+    const program: Stmt[] = [
+      { op: "set", var: "y", value: { bin: "+", left: { callProc: "double", args: { x: lit(21) } }, right: lit(1) } },
+    ];
+    expect(await runMacro(withProcs(program, procs), fakeHost().host)).toMatchObject({ status: "done", vars: { y: 43 } });
+  });
+
+  it("returns null without a return value, returns from a loop, and binds missing parameters to null", async () => {
+    const isEven: Expr = { not: { bin: "%", left: v("item"), right: lit(2) } };
+    const procs: Macro["procedures"] = {
+      nothing: { params: [], body: [] },
+      firstEven: {
+        params: ["items"],
+        body: [
+          { op: "forEach", list: v("items"), var: "item", body: [{ op: "if", cond: isEven, then: [{ op: "return", value: v("item") }] }] },
+          { op: "return" },
+        ],
+      },
+      echo: { params: ["a"], body: [{ op: "return", value: v("a") }] },
+    };
+    const program: Stmt[] = [
+      { op: "set", var: "a", value: { callProc: "nothing" } },
+      { op: "set", var: "b", value: { callProc: "firstEven", args: { items: lit([1, 3, 4, 6]) } } },
+      { op: "set", var: "c", value: { callProc: "firstEven", args: { items: lit([1]) } } },
+      { op: "set", var: "d", value: { callProc: "echo" } },
+    ];
+    const result = await runMacro(withProcs(program, procs), fakeHost().host);
+    expect(result).toMatchObject({ status: "done", vars: { a: null, b: 4, c: null, d: null } });
+  });
+
+  it("keeps parameters and locals inside the call, and hides the caller's variables", async () => {
+    const procs: Macro["procedures"] = {
+      shadow: {
+        params: ["a"],
+        body: [
+          { op: "set", var: "a", value: lit(5) },
+          { op: "set", var: "local", value: lit(2) },
+          { op: "return", value: { bin: "+", left: v("a"), right: v("local") } },
+        ],
+      },
+      peek: { params: [], body: [{ op: "return", value: v("outer") }] },
+    };
+    const program: Stmt[] = [
+      { op: "set", var: "a", value: lit(1) },
+      { op: "set", var: "r", value: { callProc: "shadow", args: { a: lit(0) } } },
+    ];
+    const result = await runMacro(withProcs(program, procs), fakeHost().host);
+    expect(result.status).toBe("done");
+    expect(result.vars).toEqual({ a: 1, r: 7 });
+
+    const peek: Stmt[] = [
+      { op: "set", var: "outer", value: lit(1) },
+      { op: "set", var: "r", value: { callProc: "peek" } },
+    ];
+    expect(await runMacro(withProcs(peek, procs), fakeHost().host)).toMatchObject({
+      status: "failed",
+      message: 'Variable "outer" is not set.',
+    });
+  });
+
+  it("recurses (factorial)", async () => {
+    const program: Stmt[] = [{ op: "set", var: "f", value: { callProc: "fact", args: { n: lit(10) } } }];
+    expect(await runMacro(withProcs(program, factorial), fakeHost().host)).toMatchObject({
+      status: "done",
+      vars: { f: 3628800 },
+    });
+  });
+
+  it("ends runaway recursion at the step limit", async () => {
+    const procs: Macro["procedures"] = { loop: { params: [], body: [{ op: "return", value: { callProc: "loop" } }] } };
+    const program: Stmt[] = [{ op: "set", var: "x", value: { callProc: "loop" } }];
+    expect(await runMacro(withProcs(program, procs), fakeHost().host, { maxSteps: 50 })).toMatchObject({
+      status: "failed",
+      message: "Step limit of 50 reached.",
+    });
+    expect(await runMacro(withProcs(program, procs), fakeHost().host)).toMatchObject({
+      status: "failed",
+      message: `Step limit of ${DEFAULT_MAX_STEPS} reached.`,
+    });
+  });
+
+  it("fails cleanly on return outside a procedure", async () => {
+    const program: Stmt[] = [
+      { op: "set", var: "a", value: lit(1) },
+      { op: "return", value: lit(2) },
+      { op: "set", var: "b", value: lit(3) },
+    ];
+    expect(await runMacro(macro(program), fakeHost().host)).toEqual({
+      status: "failed",
+      message: "return can only be used inside a procedure.",
+      toolCalls: 0,
+      vars: { a: 1 },
+    });
+  });
+
+  it("fails on an unknown procedure or argument", async () => {
+    const run = (expr: Expr) => runMacro(withProcs([{ op: "set", var: "x", value: expr }], factorial), fakeHost().host);
+    expect(await run({ callProc: "missing" })).toMatchObject({ status: "failed", message: 'Unknown procedure "missing".' });
+    expect(await run({ callProc: "toString" })).toMatchObject({ status: "failed", message: 'Unknown procedure "toString".' });
+    expect(await run({ callProc: "fact", args: { m: lit(1) } })).toMatchObject({
+      status: "failed",
+      message: 'Procedure "fact" has no parameter "m".',
+    });
+  });
+
+  it("makes each tool call once in a statement that also calls a procedure", async () => {
+    let count = 0;
+    const fake = fakeHost({ next: () => ++count });
+    const procs: Macro["procedures"] = { id: { params: ["x"], body: [{ op: "return", value: v("x") }] } };
+    const next: Expr = { call: "next" };
+    const below2: Expr = { bin: "<", left: { callProc: "id", args: { x: v("i") } }, right: lit(2) };
+    const program: Stmt[] = [
+      { op: "set", var: "i", value: lit(0) },
+      {
+        op: "while",
+        cond: { bin: "and", left: { toolAvailable: "next" }, right: below2 },
+        body: [{ op: "set", var: "i", value: { bin: "+", left: v("i"), right: lit(1) } }],
+      },
+      { op: "set", var: "sum", value: { bin: "+", left: next, right: { callProc: "id", args: { x: next } } } },
+    ];
+    const result = await runMacro(withProcs(program, procs, { next: { site: "s", name: "next" } }), fake.host);
+    expect(result).toMatchObject({ status: "done", toolCalls: 2, vars: { i: 2, sum: 3 } });
+    expect(fake.calls).toHaveLength(2);
+  });
+});

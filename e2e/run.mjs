@@ -1,0 +1,199 @@
+/**
+ * End-to-end check: loads the built extension into Chromium with WebMCP
+ * enabled, opens the rocket fixture, and runs the bundled sample macro; then
+ * runs further scenarios against their own fixtures. Exits non-zero when any
+ * check fails.
+ *
+ *   npm run build && CHROMIUM_PATH=/path/to/chrome npm run test:e2e
+ */
+import { createServer } from "node:http";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { chromium } from "playwright";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const extension = resolve(here, "../dist");
+const RUN_TIMEOUT_MS = 30_000;
+
+// WebMCP needs a secure context, and http://localhost is one.
+// `/navigate` (with any query) serves the navigation fixture; every other path the rocket.
+const server = createServer(async (request, response) => {
+  const fixture = new URL(request.url, "http://localhost").pathname === "/navigate" ? "navigate.html" : "rocket.html";
+  response.setHeader("content-type", "text/html");
+  response.end(await readFile(join(here, "fixtures", fixture)));
+});
+await new Promise((ready) => server.listen(0, "localhost", ready));
+const pageUrl = `http://localhost:${server.address().port}/`;
+
+const profile = await mkdtemp(join(tmpdir(), "wmm-e2e-"));
+let context;
+let failed = false;
+const check = (label, ok, detail = "") => {
+  console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail ? `  (${detail})` : ""}`);
+  if (!ok) failed = true;
+};
+
+try {
+  context = await chromium.launchPersistentContext(profile, {
+    // Extensions need the full browser; the new headless mode supports them.
+    headless: false,
+    executablePath: process.env.CHROMIUM_PATH || undefined,
+    args: [
+      "--headless=new",
+      `--disable-extensions-except=${extension}`,
+      `--load-extension=${extension}`,
+      "--enable-features=WebMCPTesting",
+    ],
+  });
+
+  const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
+  const extensionId = new URL(worker.url()).host;
+
+  const page = await context.newPage();
+  await page.goto(pageUrl);
+  const status = () => page.textContent("#status");
+  check("fixture page has WebMCP", (await status()) === "IDLE", await status());
+
+  const tabId = await worker.evaluate(async (url) => (await chrome.tabs.query({ url: `${url}*` }))[0]?.id, pageUrl);
+  check("background can find the tab", typeof tabId === "number", String(tabId));
+
+  // Drive the run the way the side panel does: messages from an extension page.
+  const panel = await context.newPage();
+  await panel.goto(`chrome-extension://${extensionId}/src/sidepanel/index.html`);
+
+  // Asks the tab's content script, through the bridge, which tools it sees now.
+  const listTools = () =>
+    panel.evaluate(async (tabId) => {
+      const tools = await chrome.tabs.sendMessage(tabId, { type: "list-tools" }, { frameId: 0 });
+      return Array.isArray(tools) ? tools.map((tool) => tool.name).sort() : [];
+    }, tabId);
+
+  const idleTools = await listTools();
+  check(
+    "IDLE registers diagnostics but not the later steps",
+    idleTools.includes("run_diagnostics") && !idleTools.includes("load_fuel") && !idleTools.includes("ignite_engines"),
+    idleTools.join(", "),
+  );
+
+  const run = (inputs) => runMacro(panel, tabId, "sample-rocket-launcher", inputs);
+
+  const bad = await run({ trajectory: "Mars", authCode: "0000" });
+  check(
+    "wrong auth code fails with the tool's error",
+    bad.status === "failed" && bad.message === "Invalid authorization code.",
+    JSON.stringify({ status: bad.status, message: bad.message }),
+  );
+  check("wrong auth code does not launch", (await status()) === "FUELED", await status());
+
+  const fueledTools = await listTools();
+  check(
+    "FUELED registers prepare_launch and drops diagnostics",
+    fueledTools.includes("prepare_launch") && !fueledTools.includes("run_diagnostics"),
+    fueledTools.join(", "),
+  );
+
+  const good = await run({ trajectory: "Mars", authCode: "4821" });
+  check("macro completes", good.status === "done", JSON.stringify({ status: good.status, message: good.message, toolCalls: good.toolCalls }));
+  check("rocket is launched", (await status()) === "LAUNCHED", await status());
+
+  await navigationScenario(context, worker, panel);
+} catch (error) {
+  check("e2e script ran to the end", false, error instanceof Error ? error.message : String(error));
+} finally {
+  await context?.close();
+  server.close();
+  await rm(profile, { recursive: true, force: true });
+}
+
+process.exit(failed ? 1 : 0);
+
+/**
+ * Starts a run the way the side panel does, from an extension page, and
+ * resolves with its result, or a "timeout" status when none arrives.
+ */
+function runMacro(panel, tabId, macroId, inputs) {
+  return panel.evaluate(
+    ({ tabId, macroId, inputs, timeoutMs }) =>
+      new Promise((done) => {
+        const timer = setTimeout(() => finish({ status: "timeout", message: `No run-finished in ${timeoutMs} ms.` }), timeoutMs);
+        const listener = (message) => {
+          if (message?.type === "run-finished" && message.tabId === tabId) finish(message.result);
+        };
+        const finish = (result) => {
+          clearTimeout(timer);
+          chrome.runtime.onMessage.removeListener(listener);
+          done(result);
+        };
+        chrome.runtime.onMessage.addListener(listener);
+        chrome.runtime.sendMessage({ type: "run-macro", macroId, inputs, tabId });
+      }),
+    { tabId, macroId, inputs, timeoutMs: RUN_TIMEOUT_MS },
+  );
+}
+
+/** A macro over the navigation fixture's tools, which all live on one site. */
+function navigationMacro(id, program) {
+  const names = ["open_page_b", "leave_for_blank", "open_view_c", "finish"];
+  return {
+    wmm: 1,
+    id,
+    name: id,
+    sites: { fixture: { match: ["http://localhost/*"] } },
+    tools: Object.fromEntries(names.map((name) => [name, { site: "fixture", name }])),
+    trigger: { site: "fixture", anyOf: [] },
+    program,
+  };
+}
+
+/**
+ * A run continues across the navigations its own tool calls cause: a full
+ * page load (A to B), then an SPA route change in place (B to C). A call that
+ * leaves for a page without the content script fails within its timeout.
+ */
+async function navigationScenario(context, worker, panel) {
+  const journey = navigationMacro("e2e-navigate", [
+    { op: "call", tool: "open_page_b", saveAs: "loaded" },
+    { op: "call", tool: "open_view_c", saveAs: "routed" },
+    { op: "call", tool: "finish", saveAs: "end" },
+  ]);
+  const stranded = navigationMacro("e2e-navigate-blank", [
+    { op: "call", tool: "leave_for_blank" },
+    { op: "waitForTool", tool: "finish", timeoutMs: 3000 },
+  ]);
+  await panel.evaluate(async (added) => {
+    const { macros = [] } = await chrome.storage.local.get("macros");
+    await chrome.storage.local.set({ macros: [...macros, ...added] });
+  }, [journey, stranded]);
+
+  const page = await context.newPage();
+  await page.goto(`${pageUrl}navigate`);
+  const shown = () => page.textContent("#page");
+  check("navigation fixture starts on page A", (await shown()) === "A", await shown());
+  const tabId = await worker.evaluate(async (url) => (await chrome.tabs.query({ url }))[0]?.id, `${pageUrl}navigate*`);
+
+  const result = await runMacro(panel, tabId, journey.id, {});
+  check(
+    "macro follows a full page load and an SPA navigation to the end",
+    result.status === "done" && result.toolCalls === 3,
+    JSON.stringify({ status: result.status, message: result.message, toolCalls: result.toolCalls }),
+  );
+  check(
+    "the navigating calls return null and the last call its result",
+    result.vars?.loaded === null && result.vars?.routed === null && result.vars?.end?.done === true,
+    JSON.stringify(result.vars),
+  );
+  check("the run ends on view C", (await shown()) === "DONE" && page.url().endsWith("?page=b&view=c"), page.url());
+
+  await page.goto(`${pageUrl}navigate`);
+  const started = Date.now();
+  const left = await runMacro(panel, tabId, stranded.id, {});
+  const elapsed = Date.now() - started;
+  check(
+    "leaving for a page with no content script fails within the timeout, saying why",
+    left.status === "failed" && /did not report its tools/.test(left.message ?? "") && elapsed < 10_000,
+    JSON.stringify({ status: left.status, message: left.message, elapsed }),
+  );
+  check("the tab is on the blank page", page.url() === "about:blank", page.url());
+}

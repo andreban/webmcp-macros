@@ -106,3 +106,31 @@ describe("ProgramView", () => {
     expect(bare).toContain(">k<");
   });
 });
+
+describe("ProgramView data blocks", () => {
+  const data = renderToStaticMarkup(
+    <ProgramView
+      macro={{
+        ...macro,
+        program: [
+          { op: "setKey", var: "seen", key: { var: "cell" }, value: { length: { keys: { var: "seen" } } } },
+          { op: "push", var: "queue", value: { getKey: { var: "grid" }, key: { lit: "0,0" } } },
+          { op: "popFront", var: "queue", saveAs: "cell" },
+          { op: "popBack", var: "queue" },
+          { op: "if", cond: { hasKey: { var: "seen" }, key: { lit: "a" } }, then: [] },
+          { op: "if", cond: { contains: { var: "queue" }, item: { lit: 1 } }, then: [] },
+        ],
+      }}
+    />,
+  );
+
+  it("opens data statements with their verbs", () => {
+    expect(verbs(data)).toEqual(["set key", "add", "take first of", "take last of", "if", "if"]);
+  });
+
+  it("renders data expressions", () => {
+    for (const text of ["length of ", "keys of ", " has ", " contains ", "to the end of ", "&quot;0,0&quot;</span> of "]) {
+      expect(data).toContain(text);
+    }
+  });
+});

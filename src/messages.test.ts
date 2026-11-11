@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRunEvent, type RunEvent } from "./messages";
+import { isBackgroundRequest, isExecuteToolResponse, isRunEvent, type BackgroundRequest, type RunEvent } from "./messages";
 
 const base = { tabId: 3, macroId: "m" };
 const result = { status: "done", toolCalls: 2, vars: { x: 1 } } as const;
@@ -28,4 +28,42 @@ describe("isRunEvent", () => {
   ])("rejects %s", (_label, message) => {
     expect(isRunEvent(message)).toBe(false);
   });
+});
+
+describe("isBackgroundRequest", () => {
+  it.each<BackgroundRequest>([
+    { type: "tools-changed", tools: [{ name: "search", description: "d" }], matches: 2 },
+    { type: "run-macro", macroId: "m", inputs: { q: "x" } },
+    { type: "run-macro", macroId: "m", inputs: {}, tabId: 4 },
+    { type: "stop-run" },
+    { type: "stop-run", tabId: 4 },
+  ])("accepts a well-formed $type", (message) => {
+    expect(isBackgroundRequest(message)).toBe(true);
+  });
+
+  it.each<[string, unknown]>([
+    ["null", null],
+    ["a run event", { type: "run-message", ...base, text: "hi" }],
+    ["tools that are not a list", { type: "tools-changed", tools: {}, matches: 0 }],
+    ["a tool without a name", { type: "tools-changed", tools: [{ description: "d" }], matches: 0 }],
+    ["a missing match count", { type: "tools-changed", tools: [] }],
+    ["a run without a macro id", { type: "run-macro", inputs: {} }],
+    ["inputs that are a list", { type: "run-macro", macroId: "m", inputs: [] }],
+    ["a string tabId", { type: "stop-run", tabId: "4" }],
+    ["a fractional tabId", { type: "run-macro", macroId: "m", inputs: {}, tabId: 1.5 }],
+  ])("rejects %s", (_label, message) => {
+    expect(isBackgroundRequest(message)).toBe(false);
+  });
+});
+
+describe("isExecuteToolResponse", () => {
+  it.each<unknown>([{ ok: true, result: null }, { ok: false, error: "boom" }, { ok: false, error: "gone", notFound: true }])(
+    "accepts %j",
+    (value) => expect(isExecuteToolResponse(value)).toBe(true),
+  );
+
+  it.each<unknown>([null, { ok: true }, { ok: false }, { ok: "true", result: 1 }, { ok: false, error: 3 }])(
+    "rejects %j",
+    (value) => expect(isExecuteToolResponse(value)).toBe(false),
+  );
 });

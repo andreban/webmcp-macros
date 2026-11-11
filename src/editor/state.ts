@@ -23,6 +23,8 @@ export type EditorAction =
   /** `to` is a position in the macro as it is before the move. */
   | { type: "moveStmt"; from: Path; to: Path }
   | { type: "replaceNode"; at: Path; node: Stmt | Expr }
+  /** Removes an optional field of a statement, such as `else` or a `stop` message. */
+  | { type: "clearSlot"; at: Path }
   | { type: "setMeta"; meta: Partial<MacroMeta> }
   | { type: "addInput"; input: MacroInput }
   /** Replaces the input at `index`; a new key is renamed in every `{input}` reference. */
@@ -66,6 +68,11 @@ const STMT_SLOTS: { readonly [K in Stmt["op"]]: Slots } = {
   message: { text: "expr" },
   stop: { message: "expr" },
   fail: { message: "expr" },
+  setKey: { key: "expr", value: "expr" },
+  push: { value: "expr" },
+  popFront: {},
+  popBack: {},
+  return: { value: "expr" },
 };
 
 function exprSlots(expr: Expr): Slots {
@@ -74,7 +81,12 @@ function exprSlots(expr: Expr): Slots {
   if ("not" in expr) return { not: "expr" };
   if ("obj" in expr) return { obj: "records" };
   if ("list" in expr) return { list: "items" };
-  if ("call" in expr) return { args: "records" };
+  if ("call" in expr || "callProc" in expr) return { args: "records" };
+  if ("getKey" in expr) return { getKey: "expr", key: "expr" };
+  if ("hasKey" in expr) return { hasKey: "expr", key: "expr" };
+  if ("length" in expr) return { length: "expr" };
+  if ("contains" in expr) return { contains: "expr", item: "expr" };
+  if ("keys" in expr) return { keys: "expr" };
   return {};
 }
 
@@ -178,6 +190,26 @@ function replaceNode(macro: Macro, at: Path, node: Stmt | Expr): Macro | undefin
   // Statements are replaced only where one exists; expressions may fill empty slots.
   const fits = found.kind === "stmt" ? "op" in node && found.node !== undefined : !("op" in node);
   return fits ? writeMacro(macro, at, node) : undefined;
+}
+
+type OptionalKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? K : never }[keyof T];
+
+// Checked against the format: listing a required field fails the build.
+const OPTIONAL: { readonly [O in Stmt["op"]]?: readonly OptionalKeys<Extract<Stmt, { op: O }>>[] } = {
+  call: ["args", "saveAs"],
+  if: ["else"],
+  waitForTool: ["timeoutMs"],
+  stop: ["message"],
+};
+
+function clearSlot(macro: Macro, at: Path): Macro | undefined {
+  const field = at.at(-1);
+  const parent = getNode(macro, at.slice(0, -1));
+  if (parent?.kind !== "stmt" || !parent.node || typeof field !== "string") return undefined;
+  const optional: readonly string[] = OPTIONAL[parent.node.op] ?? [];
+  if (!optional.includes(field) || !Object.hasOwn(parent.node, field)) return undefined;
+  const rest = Object.fromEntries(Object.entries(parent.node).filter(([key]) => key !== field));
+  return writeMacro(macro, at.slice(0, -1), rest);
 }
 
 function setMeta(macro: Macro, meta: Partial<MacroMeta>): Macro | undefined {
@@ -290,6 +322,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return commit(state, moveStmt(macro, action.from, action.to));
     case "replaceNode":
       return commit(state, replaceNode(macro, action.at, action.node));
+    case "clearSlot":
+      return commit(state, clearSlot(macro, action.at));
     case "setMeta":
       return commit(state, setMeta(macro, action.meta));
     case "addInput":
