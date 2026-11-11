@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Expr, Json, Macro, Stmt } from "../macro/types";
-import { runMacro, type StepInfo, type ToolHost } from "./interpreter";
+import { DEFAULT_MAX_STEPS, runMacro, type StepInfo, type ToolHost } from "./interpreter";
 
 /** A host whose tools answer from `handlers`; only tools in `available` can be called. */
 function fakeHost(handlers: Record<string, (args: Record<string, Json>) => Json> = {}) {
@@ -162,11 +162,295 @@ describe("runMacro", () => {
     await runMacro(macro([{ op: "message", text: { obj: { n: lit(1) } } }]), fake.host);
     expect(fake.messages).toEqual(['{"n":1}']);
   });
+});
 
-  it("fails clearly on statements this runner does not handle", async () => {
-    const program: Stmt[] = [{ op: "if", cond: lit(true), then: [] }];
+const v = (name: string): Expr => ({ var: name });
+const add = (name: string, amount: Expr): Stmt => ({
+  op: "set",
+  var: name,
+  value: { bin: "+", left: v(name), right: amount },
+});
+
+describe("control flow", () => {
+  it("takes the then or the else branch", async () => {
+    const program: Stmt[] = [
+      {
+        op: "if",
+        cond: lit(1),
+        then: [{ op: "set", var: "a", value: lit("then") }],
+        else: [{ op: "set", var: "a", value: lit("else") }],
+      },
+      {
+        op: "if",
+        cond: lit(""),
+        then: [{ op: "set", var: "b", value: lit("then") }],
+        else: [{ op: "set", var: "b", value: lit("else") }],
+      },
+      { op: "if", cond: lit([]), then: [{ op: "set", var: "c", value: lit("then") }] },
+    ];
     const result = await runMacro(macro(program), fakeHost().host);
-    expect(result).toMatchObject({ status: "failed", message: 'The "if" statement is not supported yet.' });
+    expect(result).toMatchObject({ status: "done", vars: { a: "then", b: "else" } });
+    expect(result.vars).not.toHaveProperty("c");
+  });
+
+  it("repeats a body the evaluated number of times", async () => {
+    const program: Stmt[] = [
+      { op: "set", var: "n", value: lit(0) },
+      { op: "repeat", times: { bin: "+", left: lit(1), right: lit(2) }, body: [add("n", lit(1))] },
+      { op: "repeat", times: lit("not a number"), body: [add("n", lit(100))] },
+    ];
+    expect(await runMacro(macro(program), fakeHost().host)).toMatchObject({ status: "done", vars: { n: 3 } });
+  });
+
+  it("loops while the condition holds", async () => {
+    const program: Stmt[] = [
+      { op: "set", var: "n", value: lit(0) },
+      { op: "while", cond: { bin: "<", left: v("n"), right: lit(5) }, body: [add("n", lit(2))] },
+    ];
+    expect(await runMacro(macro(program), fakeHost().host)).toMatchObject({ status: "done", vars: { n: 6 } });
+  });
+
+  it("binds each list item in forEach", async () => {
+    const program: Stmt[] = [
+      { op: "set", var: "sum", value: lit(0) },
+      { op: "forEach", list: lit([1, 2, 3]), var: "item", body: [add("sum", v("item"))] },
+    ];
+    expect(await runMacro(macro(program), fakeHost().host)).toMatchObject({
+      status: "done",
+      vars: { sum: 6, item: 3 },
+    });
+  });
+
+  it("fails forEach over something that is not a list", async () => {
+    const program: Stmt[] = [{ op: "forEach", list: lit({ a: 1 }), var: "x", body: [] }];
+    const result = await runMacro(macro(program), fakeHost().host);
+    expect(result).toMatchObject({ status: "failed", message: "forEach needs a list." });
+  });
+
+  it("stops from inside a loop", async () => {
+    const program: Stmt[] = [{ op: "while", cond: lit(true), body: [{ op: "stop", message: lit("out") }] }];
+    expect(await runMacro(macro(program), fakeHost().host)).toMatchObject({ status: "stopped", message: "out" });
+  });
+
+  it("waits for a tool with its own timeout or the default", async () => {
+    const fake = fakeHost({ t: () => null });
+    const tools = { t: { site: "s", name: "t" }, gone: { site: "s", name: "gone" } };
+    const program: Stmt[] = [
+      { op: "waitForTool", tool: "t", timeoutMs: 2500 },
+      { op: "waitForTool", tool: "t" },
+      { op: "waitForTool", tool: "gone" },
+    ];
+    const result = await runMacro(macro(program, tools), fake.host, { toolTimeoutMs: 700 });
+    expect(result).toMatchObject({ status: "failed", message: 'Tool "gone" never became available.', toolCalls: 0 });
+    expect(fake.waits).toEqual([
+      { name: "t", timeoutMs: 2500 },
+      { name: "t", timeoutMs: 700 },
+      { name: "gone", timeoutMs: 700 },
+    ]);
+  });
+});
+
+describe("limits", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const tools = { t: { site: "s", name: "t" } };
+  const forever: Stmt[] = [{ op: "while", cond: lit(true), body: [{ op: "call", tool: "t" }] }];
+
+  it("fails a while-true loop at the step limit", async () => {
+    const fake = fakeHost({ t: () => null });
+    const result = await runMacro(macro(forever, tools), fake.host, { maxSteps: 50 });
+    // Each iteration is one loop step plus one tool call.
+    expect(result).toMatchObject({ status: "failed", message: "Step limit of 50 reached.", toolCalls: 25 });
+  });
+
+  it("counts empty loop iterations, with a default limit of 3000", async () => {
+    const program: Stmt[] = [{ op: "while", cond: lit(true), body: [] }];
+    const result = await runMacro(macro(program), fakeHost().host);
+    expect(DEFAULT_MAX_STEPS).toBe(3000);
+    expect(result).toMatchObject({ status: "failed", message: `Step limit of ${DEFAULT_MAX_STEPS} reached.` });
+  });
+
+  it("allows exactly maxSteps steps", async () => {
+    const program: Stmt[] = [{ op: "repeat", times: lit(2), body: [{ op: "call", tool: "t" }] }];
+    const result = await runMacro(macro(program, tools), fakeHost({ t: () => null }).host, { maxSteps: 4 });
+    expect(result).toMatchObject({ status: "done", toolCalls: 2 });
+  });
+
+  it("stops mid-run when aborted and reports the calls made", async () => {
+    const controller = new AbortController();
+    let count = 0;
+    const fake = fakeHost({
+      t: () => {
+        if (++count === 3) controller.abort();
+        return count;
+      },
+    });
+    const result = await runMacro(macro(forever, tools), fake.host, { signal: controller.signal });
+    expect(result).toMatchObject({ status: "failed", message: "Stopped by the user.", toolCalls: 3 });
+    expect(fake.calls).toHaveLength(3);
+  });
+
+  it("does not start when already aborted", async () => {
+    const fake = fakeHost({ t: () => null });
+    const result = await runMacro(macro([{ op: "call", tool: "t" }], tools), fake.host, {
+      signal: AbortSignal.abort(),
+    });
+    expect(result).toEqual({ status: "failed", message: "Stopped by the user.", toolCalls: 0, vars: {} });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("pauses for wait", async () => {
+    vi.useFakeTimers();
+    const program: Stmt[] = [
+      { op: "wait", ms: 1000 },
+      { op: "set", var: "after", value: lit(true) },
+    ];
+    let settled = false;
+    const run = runMacro(macro(program), fakeHost().host).then((result) => {
+      settled = true;
+      return result;
+    });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await run).toMatchObject({ status: "done", vars: { after: true } });
+  });
+
+  it("ends a wait as soon as the run is aborted", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const program: Stmt[] = [
+      { op: "wait", ms: 60_000 },
+      { op: "set", var: "after", value: lit(true) },
+    ];
+    const run = runMacro(macro(program), fakeHost().host, { signal: controller.signal });
+    await vi.advanceTimersByTimeAsync(10);
+    controller.abort();
+    expect(await run).toEqual({ status: "failed", message: "Stopped by the user.", toolCalls: 0, vars: {} });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+/** A stand-in for the rocket demo in dynamic mode: each tool is registered only in its state. */
+function fakeRocket(authCode: string, initialStatus = "IDLE") {
+  let status = initialStatus;
+  const calls: string[] = [];
+  const always = ["get_page_state", "calculate_fuel", "reset_system"];
+  const byState: Record<string, string[]> = {
+    IDLE: ["run_diagnostics"],
+    DIAGNOSTICS: ["load_fuel"],
+    FUELED: ["prepare_launch"],
+    PREPARED: ["ignite_engines"],
+  };
+  const available = (name: string) => always.includes(name) || (byState[status] ?? []).includes(name);
+  const host: ToolHost = {
+    async isToolAvailable(name) {
+      return available(name);
+    },
+    async waitForTool(name) {
+      if (!available(name)) throw new Error("timeout");
+    },
+    async callTool(name, args): Promise<Json> {
+      if (!available(name)) throw new Error(`tool ${name} is not registered`);
+      calls.push(name);
+      switch (name) {
+        case "get_page_state":
+          return { status };
+        case "reset_system":
+          status = "IDLE";
+          return { status };
+        case "calculate_fuel":
+          return { trajectory: args.trajectory ?? null, amount: 120, oxidizerRatio: 2.5 };
+        case "run_diagnostics":
+          status = "DIAGNOSTICS";
+          return { status };
+        case "load_fuel":
+          if (args.amount !== 120 || args.oxidizer_ratio !== 2.5) return { error: "Bad fuel." };
+          status = "FUELED";
+          return { status };
+        case "prepare_launch":
+          if (args.auth_code !== authCode) return { error: "Invalid authorization code." };
+          status = "PREPARED";
+          return { status };
+        case "ignite_engines":
+          status = "LAUNCHED";
+          return { status };
+      }
+      throw new Error(`unexpected tool ${name}`);
+    },
+  };
+  return { host, calls, status: () => status };
+}
+
+const rocketMacro = macro(
+  [
+    { op: "call", tool: "state", saveAs: "state" },
+    {
+      op: "if",
+      cond: { bin: "!=", left: { get: v("state"), path: ["status"] }, right: lit("IDLE") },
+      then: [{ op: "call", tool: "reset" }],
+    },
+    { op: "call", tool: "diagnostics" },
+    { op: "call", tool: "fuelPlan", args: { trajectory: { input: "trajectory" } }, saveAs: "plan" },
+    {
+      op: "call",
+      tool: "loadFuel",
+      args: {
+        amount: { get: v("plan"), path: ["amount"] },
+        oxidizer_ratio: { get: v("plan"), path: ["oxidizerRatio"] },
+      },
+    },
+    { op: "call", tool: "prepare", args: { auth_code: { input: "authCode" } }, saveAs: "prepared" },
+    {
+      op: "if",
+      cond: { get: v("prepared"), path: ["error"] },
+      then: [{ op: "fail", message: { get: v("prepared"), path: ["error"] } }],
+    },
+    { op: "call", tool: "ignite" },
+  ],
+  {
+    state: { site: "s", name: "get_page_state" },
+    reset: { site: "s", name: "reset_system" },
+    diagnostics: { site: "s", name: "run_diagnostics" },
+    fuelPlan: { site: "s", name: "calculate_fuel" },
+    loadFuel: { site: "s", name: "load_fuel" },
+    prepare: { site: "s", name: "prepare_launch" },
+    ignite: { site: "s", name: "ignite_engines" },
+  },
+);
+
+describe("rocket macro", () => {
+  it("drives the rocket to LAUNCHED through tools that appear per state", async () => {
+    const rocket = fakeRocket("1234");
+    const result = await runMacro(rocketMacro, rocket.host, { inputs: { trajectory: "Mars", authCode: "1234" } });
+    expect(result).toMatchObject({ status: "done", toolCalls: 6 });
+    expect(rocket.status()).toBe("LAUNCHED");
+    expect(rocket.calls).toEqual([
+      "get_page_state",
+      "run_diagnostics",
+      "calculate_fuel",
+      "load_fuel",
+      "prepare_launch",
+      "ignite_engines",
+    ]);
+  });
+
+  it("resets first when the rocket is not idle", async () => {
+    const rocket = fakeRocket("1234", "FUELED");
+    const result = await runMacro(rocketMacro, rocket.host, { inputs: { trajectory: "Moon", authCode: "1234" } });
+    expect(result.status).toBe("done");
+    expect(rocket.calls.slice(0, 3)).toEqual(["get_page_state", "reset_system", "run_diagnostics"]);
+    expect(rocket.status()).toBe("LAUNCHED");
+  });
+
+  it("fails with the tool's error on a wrong authorization code", async () => {
+    const rocket = fakeRocket("1234");
+    const result = await runMacro(rocketMacro, rocket.host, { inputs: { trajectory: "Moon", authCode: "0000" } });
+    expect(result).toMatchObject({ status: "failed", message: "Invalid authorization code.", toolCalls: 5 });
+    expect(rocket.status()).toBe("FUELED");
+    expect(rocket.calls).not.toContain("ignite_engines");
   });
 });
 
