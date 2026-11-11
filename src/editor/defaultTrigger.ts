@@ -53,7 +53,13 @@ function collectStmt(stmt: Stmt, called: Set<string>): boolean {
       return stmt.message === undefined || collectExpr(stmt.message, called);
     case "fail":
       return collectExpr(stmt.message, called);
+    case "setKey":
+      return collectExpr(stmt.key, called) && collectExpr(stmt.value, called);
+    case "push":
+      return collectExpr(stmt.value, called);
     case "wait":
+    case "popFront":
+    case "popBack":
       return true;
     default:
       throw new Error(`Unknown statement: ${JSON.stringify(stmt satisfies never)}`);
@@ -75,5 +81,10 @@ function collectExpr(expr: Expr, called: Set<string>): true {
   else if ("not" in expr) collectExpr(expr.not, called);
   else if ("obj" in expr) collectRecord(expr.obj, called);
   else if ("list" in expr) for (const item of expr.list) collectExpr(item, called);
+  else if ("getKey" in expr) collectRecord({ of: expr.getKey, key: expr.key }, called);
+  else if ("hasKey" in expr) collectRecord({ of: expr.hasKey, key: expr.key }, called);
+  else if ("length" in expr) collectExpr(expr.length, called);
+  else if ("contains" in expr) collectRecord({ of: expr.contains, item: expr.item }, called);
+  else if ("keys" in expr) collectExpr(expr.keys, called);
   return true;
 }
