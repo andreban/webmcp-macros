@@ -7,15 +7,20 @@
 import type { BinaryOp, Expr, Json, Macro, MacroTool, Stmt } from "../macro/types";
 import { callBase, locate, type Frame, type Loop, type RunState } from "./machine";
 
+/**
+ * Every method takes the key into `Macro.sites` whose tab the step runs on:
+ * the innermost `onSite`, or the trigger site outside any. The host decides
+ * which tab that is.
+ */
 export interface ToolHost {
   /**
    * Calls a tool by its page name. `null` means the call started a navigation.
    * `frameOrigin` (from `MacroTool`) picks the frame when several register the name.
    */
-  callTool(name: string, args: Record<string, Json>, frameOrigin?: string): Promise<Json>;
-  isToolAvailable(name: string, frameOrigin?: string): Promise<boolean>;
+  callTool(name: string, args: Record<string, Json>, site: string, frameOrigin?: string): Promise<Json>;
+  isToolAvailable(name: string, site: string, frameOrigin?: string): Promise<boolean>;
   /** Resolves once the tool is registered; rejects on timeout. */
-  waitForTool(name: string, timeoutMs: number, frameOrigin?: string): Promise<void>;
+  waitForTool(name: string, timeoutMs: number, site: string, frameOrigin?: string): Promise<void>;
   message?(text: string): void;
   onStep?(step: StepInfo): void;
 }
@@ -133,9 +138,13 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
     if (++steps > maxSteps) throw new MacroRunError(`Step limit of ${maxSteps} reached.`);
   };
 
+  // Procedures run on their caller's site: the innermost `onSite` on the
+  // whole stack counts, not only those of the current procedure.
+  const site = (): string => frames.findLast((frame) => frame.site !== undefined)?.site ?? macro.trigger.site;
+
   const waitFor = async ({ name, frameOrigin }: MacroTool, timeoutMs: number): Promise<void> => {
     try {
-      await host.waitForTool(name, timeoutMs, frameOrigin);
+      await host.waitForTool(name, timeoutMs, site(), frameOrigin);
     } catch (error: unknown) {
       // A host that knows why the tool is missing says so with a MacroRunError.
       if (error instanceof MacroRunError) throw error;
@@ -143,9 +152,14 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
     }
   };
 
+  // A tool is registered by one site's pages, so calling it from another
+  // site's tab could only time out; say what is wrong instead.
   const toolRef = (alias: string): MacroTool => {
     const tool = ownValue(macro.tools, alias);
     if (!tool) throw new MacroRunError(`Unknown tool alias "${alias}".`);
+    if (tool.site !== site()) {
+      throw new MacroRunError(`Tool "${tool.name}" belongs to site "${tool.site}"; put it in an "on site" block for that site.`);
+    }
     return tool;
   };
 
@@ -160,7 +174,7 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
       await waitFor(tool, toolTimeoutMs);
       toolCalls++;
       host.onStep?.({ count: toolCalls, tool: tool.name, args });
-      return host.callTool(tool.name, args, tool.frameOrigin);
+      return host.callTool(tool.name, args, site(), tool.frameOrigin);
     });
 
   const callProc = (procName: string, argExprs: Record<string, Expr> = {}): Promise<Json> =>
@@ -222,7 +236,7 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
     // Kept like call results, so a replayed statement takes the same branches.
     if ("toolAvailable" in expr) return once(() => {
         const { name, frameOrigin } = toolRef(expr.toolAvailable);
-        return host.isToolAvailable(name, frameOrigin);
+        return host.isToolAvailable(name, site(), frameOrigin);
       });
     if ("call" in expr) return call(expr.call, expr.args);
     if ("callProc" in expr) return callProc(expr.callProc, expr.args);
@@ -325,6 +339,12 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
       case "waitForTool":
         await waitFor(toolRef(stmt.tool), stmt.timeoutMs ?? toolTimeoutMs);
         break;
+      case "onSite":
+        // Only declared sites: their `startUrl` is the only place a run may open.
+        if (!Object.hasOwn(macro.sites, stmt.site)) throw new MacroRunError(`Unknown site "${stmt.site}".`);
+        // Leaving the body pops this frame, which restores the previous site.
+        frames.push({ branch: "body", pc: 0, site: stmt.site });
+        return;
       case "wait":
         await sleep(stmt.ms, signal);
         break;

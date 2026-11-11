@@ -19,7 +19,19 @@ const broadcast = (event: RunEvent): void => {
 };
 
 const runStore = createRunStore(chrome.storage.session);
-const runHost = createRunHost({ sendToTab, broadcast, loadMacros, store: runStore });
+const tabs = {
+  async listTabs() {
+    const open = await chrome.tabs.query({});
+    return open.flatMap((tab) => (tab.id !== undefined && tab.url ? [{ id: tab.id, url: tab.url }] : []));
+  },
+  async openTab(url: string) {
+    // In the background, so the run's own tab and its launcher keep the focus.
+    const tab = await chrome.tabs.create({ url, active: false });
+    if (tab.id === undefined) throw new Error(`Could not open ${url}.`);
+    return tab.id;
+  },
+};
+const runHost = createRunHost({ sendToTab, broadcast, loadMacros, store: runStore, tabs });
 
 /**
  * Picks up the runs a stopped worker left behind. Each tab's tools are read

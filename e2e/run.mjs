@@ -18,8 +18,9 @@ const extension = resolve(here, "../dist");
 const RUN_TIMEOUT_MS = 30_000;
 
 // WebMCP needs a secure context, and http://localhost is one.
-// `/navigate` and `/frames` (with any query) serve their fixtures; every other path the rocket.
-const fixtures = { "/navigate": "navigate.html", "/frames": "frames.html" };
+// `/navigate` and `/frames` (with any query) serve their fixtures, `/cross` the
+// cross-site one (on localhost and 127.0.0.1, two origins); every other path the rocket.
+const fixtures = { "/navigate": "navigate.html", "/frames": "frames.html", "/cross": "cross.html" };
 const server = createServer(async (request, response) => {
   const fixture = fixtures[new URL(request.url, "http://localhost").pathname] ?? "rocket.html";
   response.setHeader("content-type", "text/html");
@@ -101,6 +102,7 @@ try {
 
   await navigationScenario(context, worker, panel);
   await framesScenario(context, worker, panel);
+  await crossSiteScenario(context, worker, panel);
 } catch (error) {
   check("e2e script ran to the end", false, error instanceof Error ? error.message : String(error));
 } finally {
@@ -249,4 +251,68 @@ async function framesScenario(context, worker, panel) {
   );
   const stamped = await page.frameLocator("iframe").locator("#stamped").textContent();
   check("the iframe's page changed", stamped === "yes", stamped);
+}
+
+/**
+ * A run on one origin reads a value, then an `onSite` block opens the other
+ * origin's declared start URL in a new tab and passes the value to its tool.
+ * A second run finds that tab open and uses it instead of opening another.
+ */
+async function crossSiteScenario(context, worker, panel) {
+  const port = server.address().port;
+  const ledgerUrl = `http://127.0.0.1:${port}/cross`;
+  const macro = {
+    wmm: 1,
+    id: "e2e-cross-site",
+    name: "e2e-cross-site",
+    sites: {
+      quotes: { match: [`http://localhost:${port}/cross*`] },
+      ledger: { match: [`http://127.0.0.1:${port}/cross*`], startUrl: ledgerUrl },
+    },
+    tools: { quote: { site: "quotes", name: "read_quote" }, record: { site: "ledger", name: "record" } },
+    trigger: { site: "quotes", anyOf: [["quote"]] },
+    program: [
+      { op: "call", tool: "quote", saveAs: "q" },
+      {
+        op: "onSite",
+        site: "ledger",
+        body: [
+          {
+            op: "call",
+            tool: "record",
+            args: { value: { bin: "*", left: { get: { var: "q" }, path: ["quote"] }, right: { lit: 2 } } },
+            saveAs: "saved",
+          },
+        ],
+      },
+    ],
+  };
+  await panel.evaluate(async (added) => {
+    const { macros = [] } = await chrome.storage.local.get("macros");
+    await chrome.storage.local.set({ macros: [...macros, added] });
+  }, macro);
+
+  const page = await context.newPage();
+  await page.goto(`${pageUrl}cross`);
+  const tabId = await worker.evaluate(async (url) => (await chrome.tabs.query({ url }))[0]?.id, `${pageUrl}cross`);
+  const ledgerTabs = () => worker.evaluate(async (url) => (await chrome.tabs.query({ url })).map((tab) => tab.id), ledgerUrl);
+  check("no ledger tab is open before the run", (await ledgerTabs()).length === 0);
+
+  const first = await runMacro(panel, tabId, macro.id, {});
+  check(
+    "a cross-site run passes a value from one origin to the other",
+    first.status === "done" && first.toolCalls === 2 && first.vars?.saved?.entries === 1,
+    JSON.stringify({ status: first.status, message: first.message, vars: first.vars }),
+  );
+  const opened = await ledgerTabs();
+  check("the run opened the ledger's start URL in a new tab", opened.length === 1, JSON.stringify(opened));
+  const ledger = context.pages().find((candidate) => candidate.url() === ledgerUrl);
+  check("the ledger recorded the doubled quote", (await ledger?.textContent("#recorded")) === "34", await ledger?.textContent("#recorded"));
+
+  const second = await runMacro(panel, tabId, macro.id, {});
+  check(
+    "a second run reuses the open ledger tab",
+    second.status === "done" && second.vars?.saved?.entries === 2 && (await ledgerTabs()).length === 1,
+    JSON.stringify({ status: second.status, message: second.message, tabs: await ledgerTabs() }),
+  );
 }

@@ -30,6 +30,18 @@ describe("defaultTrigger", () => {
     });
   });
 
+  it("follows an onSite for the trigger site and stops at one for another site", () => {
+    const macro: Macro = {
+      ...twoSites,
+      program: [
+        { op: "onSite", site: "a", body: [{ op: "call", tool: "one" }] },
+        { op: "onSite", site: "b", body: [{ op: "call", tool: "other" }] },
+        { op: "call", tool: "two" },
+      ],
+    };
+    expect(defaultTrigger(macro)).toEqual({ site: "a", anyOf: [["one"]] });
+  });
+
   it("finds calls inside data statements and expressions", () => {
     const macro: Macro = {
       ...twoSites,

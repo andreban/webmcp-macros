@@ -852,15 +852,15 @@ describe("frameOrigin", () => {
   it("passes the tool's frameOrigin to every host method", async () => {
     const seen: (string | undefined)[] = [];
     const host: ToolHost = {
-      async callTool(_name, _args, frameOrigin) {
+      async callTool(_name, _args, _site, frameOrigin) {
         seen.push(`call ${frameOrigin}`);
         return null;
       },
-      async isToolAvailable(_name, frameOrigin) {
+      async isToolAvailable(_name, _site, frameOrigin) {
         seen.push(`available ${frameOrigin}`);
         return true;
       },
-      async waitForTool(_name, _timeoutMs, frameOrigin) {
+      async waitForTool(_name, _timeoutMs, _site, frameOrigin) {
         seen.push(`wait ${frameOrigin}`);
       },
     };
