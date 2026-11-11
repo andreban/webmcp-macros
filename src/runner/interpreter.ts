@@ -24,8 +24,9 @@ export interface StepInfo {
 
 export interface RunOptions {
   inputs?: Record<string, Json>;
+  /** Checked before each statement and loop iteration; aborting fails the run with "Stopped by the user.". */
   signal?: AbortSignal;
-  /** Upper bound on tool calls plus loop iterations. */
+  /** Upper bound on tool calls plus loop iterations; defaults to `DEFAULT_MAX_STEPS`. */
   maxSteps?: number;
   /** How long a call waits for its tool to be registered, in milliseconds. */
   toolTimeoutMs?: number;
@@ -47,15 +48,40 @@ class StopSignal {
   constructor(readonly message?: string) {}
 }
 
+/** The step limit when `RunOptions.maxSteps` is not given. */
+export const DEFAULT_MAX_STEPS = 3000;
 const DEFAULT_TOOL_TIMEOUT_MS = 10_000;
+const STOPPED_BY_USER = "Stopped by the user.";
 
 export async function runMacro(macro: Macro, host: ToolHost, options: RunOptions = {}): Promise<RunResult> {
   const inputs = options.inputs ?? {};
   const toolTimeoutMs = options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
+  const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
+  const { signal } = options;
   // A Map, not an object: variable names come from shared macros, and names
   // such as "__proto__" must not reach Object.prototype.
   const vars = new Map<string, Json>();
   let toolCalls = 0;
+  let steps = 0;
+
+  const checkAborted = () => {
+    if (signal?.aborted) throw new MacroRunError(STOPPED_BY_USER);
+  };
+
+  // Macros are shared, so a runaway loop must end on its own: every tool call
+  // and every loop iteration counts against the limit, even an empty body.
+  const tick = () => {
+    checkAborted();
+    if (++steps > maxSteps) throw new MacroRunError(`Step limit of ${maxSteps} reached.`);
+  };
+
+  const waitFor = async (name: string, timeoutMs: number): Promise<void> => {
+    try {
+      await host.waitForTool(name, timeoutMs);
+    } catch {
+      throw new MacroRunError(`Tool "${name}" never became available.`);
+    }
+  };
 
   const toolName = (alias: string): string => {
     const tool = ownValue(macro.tools, alias);
@@ -66,13 +92,10 @@ export async function runMacro(macro: Macro, host: ToolHost, options: RunOptions
   // Tools register and unregister as the page changes state, so every call
   // waits for its tool instead of assuming an earlier listing still holds.
   const call = async (alias: string, argExprs: Record<string, Expr> = {}): Promise<Json> => {
+    tick();
     const name = toolName(alias);
     const args = await evaluateRecord(argExprs);
-    try {
-      await host.waitForTool(name, toolTimeoutMs);
-    } catch {
-      throw new MacroRunError(`Tool "${name}" never became available.`);
-    }
+    await waitFor(name, toolTimeoutMs);
     toolCalls++;
     host.onStep?.({ count: toolCalls, tool: name, args });
     return host.callTool(name, args);
@@ -127,6 +150,7 @@ export async function runMacro(macro: Macro, host: ToolHost, options: RunOptions
 
   const exec = async (body: Stmt[]): Promise<void> => {
     for (const stmt of body) {
+      checkAborted();
       switch (stmt.op) {
         case "call": {
           const result = await call(stmt.tool, stmt.args);
@@ -137,12 +161,39 @@ export async function runMacro(macro: Macro, host: ToolHost, options: RunOptions
           vars.set(stmt.var, await evaluate(stmt.value));
           break;
         case "if":
-        case "repeat":
+          if (truthy(await evaluate(stmt.cond))) await exec(stmt.then);
+          else if (stmt.else) await exec(stmt.else);
+          break;
+        case "repeat": {
+          const times = Number(await evaluate(stmt.times));
+          for (let i = 0; i < times; i++) {
+            tick();
+            await exec(stmt.body);
+          }
+          break;
+        }
         case "while":
-        case "forEach":
+          while (truthy(await evaluate(stmt.cond))) {
+            tick();
+            await exec(stmt.body);
+          }
+          break;
+        case "forEach": {
+          const list = await evaluate(stmt.list);
+          if (!Array.isArray(list)) throw new MacroRunError("forEach needs a list.");
+          for (const item of list) {
+            tick();
+            vars.set(stmt.var, item);
+            await exec(stmt.body);
+          }
+          break;
+        }
         case "waitForTool":
+          await waitFor(toolName(stmt.tool), stmt.timeoutMs ?? toolTimeoutMs);
+          break;
         case "wait":
-          throw new MacroRunError(`The "${stmt.op}" statement is not supported yet.`);
+          await sleep(stmt.ms, signal);
+          break;
         case "message":
           host.message?.(text(await evaluate(stmt.text)));
           break;
@@ -170,6 +221,21 @@ export async function runMacro(macro: Macro, host: ToolHost, options: RunOptions
     if (error instanceof StopSignal) return result("stopped", error.message);
     return result("failed", error instanceof Error ? error.message : String(error));
   }
+}
+
+/** Resolves after `ms`, or rejects as soon as `signal` aborts so Stop does not wait out a long pause. */
+function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new MacroRunError(STOPPED_BY_USER));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /** Reads only own properties, so keys such as "constructor" are not inherited values. */
