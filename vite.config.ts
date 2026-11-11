@@ -5,5 +5,5 @@ import manifest from "./manifest.config.ts";
 
 export default defineConfig({
   plugins: [react(), crx({ manifest })],
-  test: { environment: "node", include: ["src/**/*.test.ts"], passWithNoTests: true },
+  test: { environment: "node", include: ["src/**/*.test.{ts,tsx}"], passWithNoTests: true },
 });
