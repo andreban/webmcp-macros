@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { MACRO_VERSION, type Macro, type Stmt } from "../macro/types";
+import { MACRO_VERSION, type Macro, type MacroInput, type Stmt } from "../macro/types";
 import {
   createEditorState,
+  describePath,
   editorReducer,
   getNode,
+  inputKeyError,
+  inputReferences,
   moveTarget,
   type EditorAction,
   type EditorState,
@@ -224,5 +227,90 @@ describe("editorReducer", () => {
     state = run(state, { type: "undo" }, { type: "undo" }, { type: "undo" }, { type: "undo" });
     expect(state.macro.name).toBe("n1");
     expect(run(createEditorState(sample(), 0), { type: "setMeta", meta: { name: "x" } }).past).toEqual([]);
+  });
+});
+
+describe("input actions", () => {
+  const text = (key: string): MacroInput => ({ key, label: key.toUpperCase(), schema: { type: "string" } });
+
+  // `when` is referenced in a nested body, inside an object and in a call argument;
+  // the literal that only looks like a reference must never be touched.
+  function withInputs(): Macro {
+    const macro = sample();
+    return {
+      ...macro,
+      inputs: [text("when"), text("who"), text("spare")],
+      program: [
+        ...macro.program,
+        {
+          op: "if",
+          cond: { not: { input: "who" } },
+          then: [{ op: "message", text: { input: "when" } }],
+          else: [{ op: "set", var: "o", value: { obj: { at: { input: "when" }, raw: { lit: { input: "when" } } } } }],
+        },
+        { op: "call", tool: "look", args: { dir: { list: [{ input: "when" }] } } },
+      ],
+    };
+  }
+
+  it("finds references by path and describes them as people count", () => {
+    const refs = inputReferences(withInputs(), "when");
+    expect(refs).toEqual([
+      ["program", 4, "then", 0, "text"],
+      ["program", 4, "else", 0, "value", "obj", "at"],
+      ["program", 5, "args", "dir", "list", 0],
+    ]);
+    expect(refs.map(describePath)).toEqual(["step 5 › then 1", "step 5 › else 1", "step 6"]);
+    expect(inputReferences(withInputs(), "spare")).toEqual([]);
+  });
+
+  it("renames a key in every reference, but not inside literals, as one undo step", () => {
+    const start = createEditorState(withInputs());
+    const state = run(start, { type: "updateInput", index: 0, input: { ...text("when"), key: "date" } });
+    expect(state.macro.inputs?.map((i) => i.key)).toEqual(["date", "who", "spare"]);
+    expect(inputReferences(state.macro, "when")).toEqual([]);
+    expect(inputReferences(state.macro, "date")).toHaveLength(3);
+    expect(getNode(state.macro, ["program", 4, "else", 0, "value", "obj", "raw"])?.node).toEqual({
+      lit: { input: "when" },
+    });
+    expect(getNode(state.macro, ["program", 4, "cond"])?.node).toEqual({ not: { input: "who" } });
+    expect(state.past).toHaveLength(1);
+    expect(run(state, { type: "undo" }).macro).toBe(start.macro);
+  });
+
+  it.each(["who", "2nd", "has space", "", "a-b"])("rejects the key %j when renaming or adding", (key) => {
+    const start = createEditorState(withInputs());
+    expect(run(start, { type: "updateInput", index: 0, input: { ...text("when"), key } })).toBe(start);
+    expect(run(start, { type: "addInput", input: text(key) })).toBe(start);
+    expect(inputKeyError(start.macro, key)).toBeTypeOf("string");
+  });
+
+  it("edits other fields without touching the program", () => {
+    const start = createEditorState(withInputs());
+    const state = run(start, { type: "updateInput", index: 1, input: { ...text("who"), mode: "remember" } });
+    expect(state.macro.inputs?.[1]?.mode).toBe("remember");
+    expect(state.macro.program).toBe(start.macro.program);
+    expect(inputKeyError(start.macro, "who", 1)).toBeUndefined();
+    expect(run(start, { type: "updateInput", index: 9, input: text("x") })).toBe(start);
+  });
+
+  it("adds to a macro without inputs, and moves inputs", () => {
+    const added = run(
+      createEditorState(sample()),
+      { type: "addInput", input: text("a") },
+      { type: "addInput", input: text("b") },
+    );
+    expect(added.macro.inputs?.map((i) => i.key)).toEqual(["a", "b"]);
+    expect(run(added, { type: "moveInput", from: 1, to: 0 }).macro.inputs?.map((i) => i.key)).toEqual(["b", "a"]);
+    for (const [from, to] of [[0, 0], [0, 2], [2, 0], [0, -1]] as const) {
+      expect(run(added, { type: "moveInput", from, to })).toBe(added);
+    }
+  });
+
+  it("removes an unused input and refuses one that is still referenced", () => {
+    const start = createEditorState(withInputs());
+    expect(run(start, { type: "removeInput", index: 0 })).toBe(start);
+    expect(run(start, { type: "removeInput", index: 1 })).toBe(start);
+    expect(run(start, { type: "removeInput", index: 2 }).macro.inputs?.map((i) => i.key)).toEqual(["when", "who"]);
   });
 });
