@@ -42,6 +42,7 @@ const macro: Macro = {
       times: { lit: 2 },
       body: [{ op: "message", text: { call: "search", args: { query: { list: [{ lit: "a" }, { lit: "b" }] } } } }],
     },
+    { op: "onSite", site: "shop", body: [{ op: "wait", ms: 10 }] },
     { op: "stop", message: { lit: "Done" } },
   ],
 };
@@ -66,6 +67,8 @@ describe("ProgramView", () => {
       "wait",
       "repeat",
       "show",
+      "on site",
+      "wait",
       "stop",
     ]);
   });
