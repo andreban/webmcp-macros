@@ -3,8 +3,9 @@
  * extension pages. Every union is discriminated on `type`; add a variant here
  * first, then handle it on both sides.
  */
-import type { Json, ToolInfo } from "./macro/types";
+import { isMacro, type Json, type Macro, type ToolInfo } from "./macro/types";
 import type { RunResult, StepInfo } from "./runner/interpreter";
+import type { NodePath } from "./runner/machine";
 
 /** Background or side panel → the content script of one frame of a tab. */
 export type ContentRequest =
@@ -25,18 +26,30 @@ export type ExecuteToolResponse =
 export type BackgroundRequest =
   | { type: "tools-changed"; tools: ToolInfo[]; matches: number }
   /** `tabId` is left out by a content script: the background uses the sender's tab. */
-  | { type: "run-macro"; macroId: string; inputs: Record<string, Json>; tabId?: number }
+  /**
+   * Runs a saved macro by id, or, from an extension page only, the `macro`
+   * given inline, so the editor can run unsaved edits.
+   */
+  | ({ type: "run-macro"; inputs: Record<string, Json>; tabId?: number } & ({ macroId: string } | { macro: Macro }))
   | { type: "stop-run"; tabId?: number };
 
 /**
  * Background → the tab and every extension page, while a macro runs. A step
  * carries the tool name but not its arguments: they can hold the user's
- * inputs, and the tab's page is not ours.
+ * inputs, and the tab's page is not ours. The events in `PAGE_ONLY_EVENTS`
+ * go to extension pages only.
  */
 export type RunEvent =
-  | ({ type: "run-step"; tabId: number; macroId: string } & Pick<StepInfo, "count" | "tool">)
+  | ({ type: "run-step"; tabId: number; macroId: string } & Pick<StepInfo, "count" | "tool" | "path">)
+  /** The statement the run is about to execute, sent before every step. */
+  | { type: "run-at"; tabId: number; macroId: string; path: NodePath }
+  /** A tool call that returned, with its arguments and result. */
+  | ({ type: "run-call"; tabId: number; macroId: string; result: Json } & Pick<StepInfo, "tool" | "args" | "path">)
   | { type: "run-message"; tabId: number; macroId: string; text: string }
   | { type: "run-finished"; tabId: number; macroId: string; result: RunResult };
+
+/** Events that are not sent to the tab: a call's arguments and result may hold the user's data. */
+export const PAGE_ONLY_EVENTS: ReadonlySet<RunEvent["type"]> = new Set(["run-at", "run-call"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -52,6 +65,10 @@ function isRunResult(value: unknown): value is RunResult {
   );
 }
 
+function isNodePath(value: unknown): value is NodePath {
+  return Array.isArray(value) && value.every((seg) => typeof seg === "string" || Number.isInteger(seg));
+}
+
 /**
  * Narrows an incoming runtime message to a `RunEvent`. Listeners also receive
  * every other message sent in the extension, so check before reading fields.
@@ -60,7 +77,11 @@ export function isRunEvent(message: unknown): message is RunEvent {
   if (!isRecord(message) || typeof message.tabId !== "number" || typeof message.macroId !== "string") return false;
   switch (message.type) {
     case "run-step":
-      return typeof message.count === "number" && typeof message.tool === "string";
+      return typeof message.count === "number" && typeof message.tool === "string" && isNodePath(message.path);
+    case "run-at":
+      return isNodePath(message.path);
+    case "run-call":
+      return typeof message.tool === "string" && isRecord(message.args) && "result" in message && isNodePath(message.path);
     case "run-message":
       return typeof message.text === "string";
     case "run-finished":
@@ -94,7 +115,11 @@ export function isBackgroundRequest(message: unknown): message is BackgroundRequ
     case "tools-changed":
       return isToolList(message.tools) && typeof message.matches === "number";
     case "run-macro":
-      return typeof message.macroId === "string" && isRecord(message.inputs) && isOptionalTabId(message.tabId);
+      return (
+        (typeof message.macroId === "string") !== isMacro(message.macro) &&
+        isRecord(message.inputs) &&
+        isOptionalTabId(message.tabId)
+      );
     case "stop-run":
       return isOptionalTabId(message.tabId);
     default:

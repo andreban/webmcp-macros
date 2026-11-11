@@ -24,7 +24,7 @@ describe("reportedTools", () => {
   });
 
   it("ignores other messages and malformed reports", () => {
-    expect(reportedTools({ type: "run-step", tabId: 1, macroId: "m", count: 1, tool: "a" })).toBeNull();
+    expect(reportedTools({ type: "run-step", tabId: 1, macroId: "m", count: 1, tool: "a", path: [] })).toBeNull();
     expect(reportedTools({ type: "tools-changed", tools: "a" })).toBeNull();
     expect(reportedTools("tools-changed")).toBeNull();
   });

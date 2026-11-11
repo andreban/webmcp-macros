@@ -5,7 +5,7 @@
  * `RunState` and returns the next state, and `runMacro` loops over it.
  */
 import type { BinaryOp, Expr, Json, Macro, MacroTool, Stmt } from "../macro/types";
-import { callBase, locate, type Frame, type Loop, type RunState } from "./machine";
+import { callBase, locate, statementPath, type Frame, type Loop, type NodePath, type RunState } from "./machine";
 
 /**
  * Every method takes the key into `Macro.sites` whose tab the step runs on:
@@ -30,6 +30,8 @@ export interface StepInfo {
   count: number;
   tool: string;
   args: Record<string, Json>;
+  /** The statement making the call (see `statementPath`). */
+  path: NodePath;
 }
 
 export interface RunOptions {
@@ -173,7 +175,7 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
       tick();
       await waitFor(tool, toolTimeoutMs);
       toolCalls++;
-      host.onStep?.({ count: toolCalls, tool: tool.name, args });
+      host.onStep?.({ count: toolCalls, tool: tool.name, args, path: statementPath(macro, state.frames) });
       return host.callTool(tool.name, args, site(), tool.frameOrigin);
     });
 

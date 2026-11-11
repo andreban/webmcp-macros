@@ -3,7 +3,7 @@
  * a run survives the navigations its own tool calls cause. This file only
  * wires `chrome.*` events to the run host in `runHost.ts`.
  */
-import { isBackgroundRequest, isToolList, type ContentRequest, type RunEvent } from "../messages";
+import { isBackgroundRequest, isToolList, PAGE_ONLY_EVENTS, type ContentRequest, type RunEvent } from "../messages";
 import type { ToolInfo } from "../macro/types";
 import { loadMacros, seedSamples } from "../storage";
 import { createRunHost } from "./runHost";
@@ -15,6 +15,7 @@ const sendToTab = (tabId: number, request: ContentRequest, frameId = 0): Promise
 const broadcast = (event: RunEvent): void => {
   // Either side may have no listener (no extension page open, tab gone).
   chrome.runtime.sendMessage(event).catch(() => {});
+  if (PAGE_ONLY_EVENTS.has(event.type)) return;
   chrome.tabs.sendMessage(event.tabId, event, { frameId: 0 }).catch(() => {});
 };
 
@@ -80,7 +81,9 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
       break;
     }
     case "run-macro":
-      void runHost.startRun(tabId, message.macroId, message.inputs);
+      if ("macroId" in message) void runHost.startRun(tabId, message.macroId, message.inputs);
+      // A content script could otherwise make the extension run any macro it wrote.
+      else if (sender.url?.startsWith(chrome.runtime.getURL(""))) void runHost.startRun(tabId, message.macro, message.inputs);
       break;
     case "stop-run":
       runHost.stopRun(tabId);

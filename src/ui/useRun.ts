@@ -42,6 +42,10 @@ export function runReducer(state: RunState | null, action: RunAction): RunState 
       switch (event.type) {
         case "run-step":
           return { ...base, step: { count: event.count, tool: event.tool } };
+        // The editor's trace; here they only say a run is in progress.
+        case "run-at":
+        case "run-call":
+          return base;
         case "run-message":
           return { ...base, messages: [...base.messages, event.text] };
         case "run-finished":

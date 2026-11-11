@@ -6,7 +6,7 @@
 import { isExecuteToolResponse, isToolList, type ContentRequest, type RunEvent } from "../messages";
 import type { Json, Macro, ToolInfo } from "../macro/types";
 import { MacroRunError, startRun as initialState, step, type RunResult, type ToolHost } from "../runner/interpreter";
-import type { RunState } from "../runner/machine";
+import { statementPath, type RunState } from "../runner/machine";
 import type { RunStore } from "./runStore";
 import { createSiteRouter, type TabRouterDeps } from "./tabRouter";
 
@@ -27,8 +27,8 @@ export interface RunHostDeps {
 export interface RunHost {
   /** Records the tools a frame's content script reported and wakes waiting runs. */
   setTools(tabId: number, tools: ToolInfo[], frameId?: number, origin?: string): void;
-  /** Runs the macro on the tab. Ignored while that tab already has a run. */
-  startRun(tabId: number, macroId: string, inputs: Record<string, Json>): Promise<void>;
+  /** Runs a saved macro, by id, or the macro given, on the tab. Ignored while that tab already has a run. */
+  startRun(tabId: number, macro: string | Macro, inputs: Record<string, Json>): Promise<void>;
   /** Continues a run saved by an earlier worker. Ignored while that tab already has a run. */
   resumeRun(tabId: number, state: RunState): Promise<void>;
   stopRun(tabId: number): void;
@@ -229,13 +229,16 @@ export function createRunHost(deps: RunHostDeps): RunHost {
           inFlight = [...inFlight, name];
           // `state` is still the one before this step: a resume repeats the step.
           await deps.store?.save(tabId, state, inFlight);
-          return tools.callTool(name, args, frameOrigin);
+          const result = await tools.callTool(name, args, frameOrigin);
+          deps.broadcast({ type: "run-call", tabId, macroId, tool: name, args, result, path: statementPath(state.macro, state.frames) });
+          return result;
         },
-        onStep: ({ count, tool }) => deps.broadcast({ type: "run-step", tabId, macroId, count, tool }),
+        onStep: ({ count, tool, path }) => deps.broadcast({ type: "run-step", tabId, macroId, count, tool, path }),
         message: (text) => deps.broadcast({ type: "run-message", tabId, macroId, text }),
       };
       while (state.status === "running") {
         inFlight = [];
+        deps.broadcast({ type: "run-at", tabId, macroId, path: statementPath(state.macro, state.frames) });
         state = await step(state, host, controller.signal);
         if (state.status === "running") await deps.store?.save(tabId, state);
       }
@@ -252,11 +255,13 @@ export function createRunHost(deps: RunHostDeps): RunHost {
     }
   };
 
-  const startRun = (tabId: number, macroId: string, inputs: Record<string, Json>): Promise<void> =>
-    drive(tabId, macroId, async () => {
-      const macro = (await deps.loadMacros()).find((candidate) => candidate.id === macroId);
-      return macro && initialState(macro, { inputs });
-    });
+  const startRun = (tabId: number, macro: string | Macro, inputs: Record<string, Json>): Promise<void> =>
+    typeof macro === "string"
+      ? drive(tabId, macro, async () => {
+          const saved = (await deps.loadMacros()).find((candidate) => candidate.id === macro);
+          return saved && initialState(saved, { inputs });
+        })
+      : drive(tabId, macro.id, async () => initialState(macro, { inputs }));
 
   return {
     setTools,

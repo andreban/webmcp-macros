@@ -91,3 +91,27 @@ function branchOf(stmt: Stmt, branch: NonNullable<Frame["branch"]>): Stmt[] | un
   }
   return undefined;
 }
+
+/** A node's address from the macro root, as the editor writes it: `["program", 2, "then", 0]`. */
+export type NodePath = (string | number)[];
+
+/**
+ * The path of the statement the next step runs: `["program", 2, "then", 0]`,
+ * or `["procedures", name, "body", 1]` inside a procedure. At the end of a
+ * block the step decides whether a loop goes round again or the block is
+ * left, so the path is the block's owner; at the end of the program or a
+ * procedure's body it is the position after the last statement.
+ */
+export function statementPath(macro: Macro, frames: readonly Frame[]): NodePath {
+  const base = Math.max(0, callBase(frames));
+  const proc = frames[base]?.call?.proc;
+  const path: NodePath = proc === undefined ? ["program"] : ["procedures", proc, "body"];
+  frames.slice(base).forEach((frame, depth) => {
+    if (depth > 0) path.push(frame.branch ?? "body");
+    path.push(frame.pc);
+  });
+  const top = frames.at(-1);
+  const block = locate(macro, frames)?.block;
+  if (top && block && top.pc >= block.length && frames.length - base > 1) path.length -= 2;
+  return path;
+}
