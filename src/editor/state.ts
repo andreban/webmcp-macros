@@ -201,14 +201,22 @@ const OPTIONAL: { readonly [O in Stmt["op"]]?: readonly OptionalKeys<Extract<Stm
   if: ["else"],
   waitForTool: ["timeoutMs"],
   stop: ["message"],
+  return: ["value"],
+  popFront: ["saveAs"],
+  popBack: ["saveAs"],
 };
+
+/** Whether `field` of an `op` statement may be absent, so the editor can add and remove it. */
+export function isOptionalSlot(op: Stmt["op"], field: string): boolean {
+  const optional: readonly string[] = OPTIONAL[op] ?? [];
+  return optional.includes(field);
+}
 
 function clearSlot(macro: Macro, at: Path): Macro | undefined {
   const field = at.at(-1);
   const parent = getNode(macro, at.slice(0, -1));
   if (parent?.kind !== "stmt" || !parent.node || typeof field !== "string") return undefined;
-  const optional: readonly string[] = OPTIONAL[parent.node.op] ?? [];
-  if (!optional.includes(field) || !Object.hasOwn(parent.node, field)) return undefined;
+  if (!isOptionalSlot(parent.node.op, field) || !Object.hasOwn(parent.node, field)) return undefined;
   const rest = Object.fromEntries(Object.entries(parent.node).filter(([key]) => key !== field));
   return writeMacro(macro, at.slice(0, -1), rest);
 }
