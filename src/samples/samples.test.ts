@@ -79,6 +79,9 @@ function walkStmts(stmts: Stmt[], refs: References): void {
         walkExpr(stmt.list, refs);
         walkStmts(stmt.body, refs);
         break;
+      case "onSite":
+        walkStmts(stmt.body, refs);
+        break;
       case "message":
         walkExpr(stmt.text, refs);
         break;

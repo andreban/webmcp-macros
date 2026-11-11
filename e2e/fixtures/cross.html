@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Cross-site fixture</title>
+  </head>
+  <body>
+    <!--
+      Served on two origins (localhost and 127.0.0.1) with different tools, so
+      a macro can only pass a value between them through a variable: the quote
+      site reads a number, the ledger site records what it is given.
+    -->
+    <p>Recorded: <output id="recorded"></output></p>
+    <script>
+      if (location.hostname === "localhost") {
+        document.modelContext.registerTool({
+          name: "read_quote",
+          description: "Reads the current quote.",
+          execute: () => ({ quote: 17 }),
+        });
+      } else {
+        const recorded = [];
+        document.modelContext.registerTool({
+          name: "record",
+          description: "Records a value in the ledger.",
+          inputSchema: { type: "object", properties: { value: { type: "number" } }, required: ["value"] },
+          execute: ({ value }) => {
+            recorded.push(value);
+            document.getElementById("recorded").textContent = recorded.join(",");
+            return { entries: recorded.length };
+          },
+        });
+      }
+    </script>
+  </body>
+</html>

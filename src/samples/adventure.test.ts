@@ -124,10 +124,10 @@ describe("adventureMacro", () => {
     const game = fakeGame();
     const host: ToolHost = {
       ...game.host,
-      callTool: (name, args) =>
+      callTool: (name, args, site) =>
         name === "use" && args.target === "storage_keypad"
           ? Promise.resolve({ success: false, message: "Incorrect PIN." })
-          : game.host.callTool(name, args),
+          : game.host.callTool(name, args, site),
     };
     const result = await runMacro(adventureMacro, host);
     expect(result).toMatchObject({ status: "failed", message: "Incorrect PIN." });

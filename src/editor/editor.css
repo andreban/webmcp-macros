@@ -21,3 +21,7 @@
 .wmm-slot-error { color: var(--danger); }
 .wmm-slot-button { padding: 0 4px; line-height: 1.3; }
 .wmm-picker { position: absolute; top: 100%; left: 0; z-index: 1; font: inherit; }
+.wmm-program [draggable="true"] { cursor: grab; }
+.wmm-program [data-drop="before"] { box-shadow: 0 -3px 0 var(--wmm-accent); }
+.wmm-program [data-drop="after"] { box-shadow: 0 3px 0 var(--wmm-accent); }
+.wmm-program [data-drop="into"] { outline: 2px dashed var(--wmm-accent); }

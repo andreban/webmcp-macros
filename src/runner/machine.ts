@@ -28,6 +28,8 @@ export interface Frame {
   branch?: "then" | "else" | "body";
   pc: number;
   loop?: Loop;
+  /** Set on the body of an `onSite`: the key into `Macro.sites` its steps run on. */
+  site?: string;
   /** Starts the body of a procedure call; `slot` is where the caller expects its result. */
   call?: { proc: string; slot: number; locals: Record<string, Json> };
   /**
@@ -84,6 +86,8 @@ export function locate(macro: Macro, frames: readonly Frame[]): { block: Stmt[];
 
 function branchOf(stmt: Stmt, branch: NonNullable<Frame["branch"]>): Stmt[] | undefined {
   if (stmt.op === "if") return branch === "body" ? undefined : stmt[branch];
-  if (stmt.op === "repeat" || stmt.op === "while" || stmt.op === "forEach") return branch === "body" ? stmt.body : undefined;
+  if (stmt.op === "repeat" || stmt.op === "while" || stmt.op === "forEach" || stmt.op === "onSite") {
+    return branch === "body" ? stmt.body : undefined;
+  }
   return undefined;
 }
