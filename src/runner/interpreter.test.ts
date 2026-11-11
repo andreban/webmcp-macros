@@ -69,7 +69,7 @@ describe("runMacro", () => {
     expect(result).toEqual({ status: "done", toolCalls: 1, vars: { d: 40, plan: { amount: 84 }, amount: 84 } });
     expect(fake.calls).toEqual([{ name: "calculate_fuel", args: { distance: 42, target: "Mars" } }]);
     expect(fake.waits).toEqual([{ name: "calculate_fuel", timeoutMs: 500 }]);
-    expect(fake.steps).toEqual([{ count: 1, tool: "calculate_fuel", args: { distance: 42, target: "Mars" } }]);
+    expect(fake.steps).toEqual([{ count: 1, tool: "calculate_fuel", args: { distance: 42, target: "Mars" }, path: ["program", 1] }]);
   });
 
   it("waits 10 seconds for a tool by default", async () => {
@@ -845,5 +845,47 @@ describe("procedures", () => {
     const result = await runMacro(withProcs(program, procs, { next: { site: "s", name: "next" } }), fake.host);
     expect(result).toMatchObject({ status: "done", toolCalls: 2, vars: { i: 2, sum: 3 } });
     expect(fake.calls).toHaveLength(2);
+  });
+});
+
+describe("step paths", () => {
+  const call: Stmt = { op: "call", tool: "t" };
+  const paths = async (m: Macro) => {
+    const fake = fakeHost({ t: () => 1 });
+    expect(await runMacro(m, fake.host)).toMatchObject({ status: "done" });
+    return fake.steps.map((step) => step.path);
+  };
+
+  it("reports the path of nested statements", async () => {
+    const program: Stmt[] = [
+      call,
+      { op: "if", cond: { lit: true }, then: [{ op: "set", var: "x", value: { lit: 1 } }, call] },
+      { op: "repeat", times: { lit: 2 }, body: [{ op: "if", cond: { lit: false }, then: [], else: [call] }] },
+    ];
+    expect(await paths(macro(program, { t: { site: "s", name: "t" } }))).toEqual([
+      ["program", 0],
+      ["program", 1, "then", 1],
+      ["program", 2, "body", 0, "else", 0],
+      ["program", 2, "body", 0, "else", 0],
+    ]);
+  });
+
+  it("reports a while condition's call at the loop, and calls inside a procedure in its body", async () => {
+    const program: Stmt[] = [
+      { op: "set", var: "n", value: { lit: 0 } },
+      {
+        op: "while",
+        cond: { bin: "<", left: { var: "n" }, right: { call: "t" } },
+        body: [{ op: "set", var: "n", value: { callProc: "inc", args: { n: { var: "n" } } } }],
+      },
+    ];
+    const procedures: Macro["procedures"] = {
+      inc: { params: ["n"], body: [{ op: "return", value: { bin: "+", left: { var: "n" }, right: { call: "t" } } }] },
+    };
+    expect(await paths({ ...macro(program, { t: { site: "s", name: "t" } }), procedures })).toEqual([
+      ["program", 1],
+      ["procedures", "inc", "body", 0],
+      ["program", 1],
+    ]);
   });
 });

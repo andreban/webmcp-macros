@@ -11,6 +11,7 @@ const step = (count: number, tool: string, macroId = "m1", tabId = 7): RunEvent 
   macroId,
   count,
   tool,
+  path: ["program", 0],
 });
 const message = (text: string, macroId = "m1", tabId = 7): RunEvent => ({ type: "run-message", tabId, macroId, text });
 const finished = (result: RunResult, macroId = "m1", tabId = 7): RunEvent => ({
@@ -55,6 +56,13 @@ describe("runReducer", () => {
     const result = done({ message: "ok" });
     const state = reduce([{ type: "start", macroId: "m1" }, event(step(1, "x")), event(message("hi")), event(finished(result))]);
     expect(state).toEqual({ macroId: "m1", messages: ["hi"], step: { count: 1, tool: "x" }, result });
+  });
+
+  it("treats the editor's trace events as a run in progress without changing it", () => {
+    const start = reduce([{ type: "start", macroId: "m1" }]);
+    const at: RunEvent = { type: "run-at", tabId: 7, macroId: "m1", path: ["program", 0] };
+    expect(runReducer(start, event(at))).toBe(start);
+    expect(runReducer(null, event(at))).toEqual({ macroId: "m1", messages: [] });
   });
 
   it("clears to idle", () => {

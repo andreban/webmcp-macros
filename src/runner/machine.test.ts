@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Expr, Json, Macro, Stmt } from "../macro/types";
 import { runMacro, startRun, step, type ToolHost } from "./interpreter";
-import { locate, type RunState } from "./machine";
+import { locate, statementPath, type Loop, type RunState } from "./machine";
 
 const lit = (value: Json): Expr => ({ lit: value });
 const v = (name: string): Expr => ({ var: name });
@@ -179,5 +179,23 @@ describe("locate", () => {
     expect(found?.block).toBe(owner?.op === "forEach" ? owner.body : undefined);
     expect(locate(macro(program), [{ pc: 2 }, { branch: "then", pc: 0 }])).toBeUndefined();
     expect(locate(macro(program), [{ pc: 9 }, { branch: "body", pc: 0 }])).toBeUndefined();
+  });
+});
+
+describe("statementPath", () => {
+  const m = macro(program);
+  const loop: Loop = { kind: "forEach", i: 0, items: [1] };
+
+  it("walks the frames into nested blocks and procedure bodies", () => {
+    expect(statementPath(m, [{ pc: 1 }])).toEqual(["program", 1]);
+    expect(statementPath(m, [{ pc: 2 }, { branch: "body", pc: 0, loop }])).toEqual(["program", 2, "body", 0]);
+    const call = { proc: "p", slot: 0, locals: {} };
+    expect(statementPath(m, [{ pc: 2 }, { pc: 3, call }, { branch: "then", pc: 1 }])).toEqual(["procedures", "p", "body", 3, "then", 1]);
+  });
+
+  it("names the owner at the end of a block, where loops decide to go round", () => {
+    const owner = program[2];
+    const end = owner?.op === "forEach" ? owner.body.length : -1;
+    expect(statementPath(m, [{ pc: 2 }, { branch: "body", pc: end, loop }])).toEqual(["program", 2]);
   });
 });

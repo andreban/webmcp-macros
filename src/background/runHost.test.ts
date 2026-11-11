@@ -218,10 +218,21 @@ describe("runs", () => {
     tools.push("go");
     await host.startRun(TAB, "m", {});
     expect(events).toEqual([
-      { type: "run-step", tabId: TAB, macroId: "m", count: 1, tool: "go" },
+      { type: "run-at", tabId: TAB, macroId: "m", path: ["program", 0] },
+      { type: "run-step", tabId: TAB, macroId: "m", count: 1, tool: "go", path: ["program", 0] },
+      { type: "run-call", tabId: TAB, macroId: "m", tool: "go", args: {}, result: 1, path: ["program", 0] },
+      { type: "run-at", tabId: TAB, macroId: "m", path: ["program", 1] },
       { type: "run-message", tabId: TAB, macroId: "m", text: "hi" },
+      { type: "run-at", tabId: TAB, macroId: "m", path: ["program", 2] },
       { type: "run-finished", tabId: TAB, macroId: "m", result: expect.objectContaining({ status: "done", toolCalls: 1 }) },
     ]);
+  });
+
+  it("runs a macro given inline without loading saved macros", async () => {
+    const { host, tools, events } = setup([], async () => ({ ok: true, result: 1 }));
+    tools.push("go");
+    await host.startRun(TAB, macro([{ op: "call", tool: "go" }], "draft"), {});
+    expect(events.at(-1)).toMatchObject({ type: "run-finished", macroId: "draft", result: { status: "done", toolCalls: 1 } });
   });
 
   it("reports an unknown macro as a failed run", async () => {
