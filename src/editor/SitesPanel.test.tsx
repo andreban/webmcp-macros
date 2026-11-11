@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Macro } from "../macro/types";
 import { flightSearchMacro, rocketLauncherMacro } from "../samples";
-import { patternError, SitesPanel, toolNames, triggerStatus } from "./SitesPanel";
+import { patternError, SitesPanel, toolInfos, triggerStatus } from "./SitesPanel";
 import { createEditorState, type EditorAction, editorReducer } from "./state";
 
 const rocketUrl = "https://bandarra.me/apps/webmcp-rocketlauncher/?mode=dynamic";
@@ -43,10 +43,20 @@ describe("triggerStatus", () => {
   });
 });
 
-describe("toolNames", () => {
-  it("keeps only well-formed tool names", () => {
-    expect(toolNames([{ name: "a" }, { name: 1 }, null, "b", { name: "c", description: "x" }])).toEqual(["a", "c"]);
-    expect(toolNames({ name: "a" })).toEqual([]);
+describe("toolInfos", () => {
+  it("keeps named tools and only their well-formed description and schema", () => {
+    const schema = { type: "object", properties: {} };
+    expect(
+      toolInfos([
+        { name: "a" },
+        { name: 1 },
+        null,
+        "b",
+        { name: "c", description: "x", inputSchema: schema, extra: true },
+        { name: "d", description: 2, inputSchema: [] },
+      ]),
+    ).toEqual([{ name: "a" }, { name: "c", description: "x", inputSchema: schema }, { name: "d" }]);
+    expect(toolInfos({ name: "a" })).toEqual([]);
   });
 });
 

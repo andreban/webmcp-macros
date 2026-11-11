@@ -33,6 +33,11 @@ export interface MacroTool {
   schemaHash?: string;
   /** The tool's inputSchema as the editor last saw it, so the macro can be edited away from the page. */
   inputSchema?: JsonSchema;
+  /**
+   * Origin of the frame (top page or iframe) that registers the tool, for
+   * when frames register equal names. Without it, the top frame wins.
+   */
+  frameOrigin?: string;
 }
 
 export interface MacroTrigger {

@@ -269,3 +269,91 @@ describe("runs", () => {
     await expect(host.toolHost(TAB, new AbortController().signal).isToolAvailable("other")).resolves.toBe(false);
   });
 });
+
+describe("frames", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const IFRAME = 3;
+
+  /** A tab whose frames list the tools in `frames`; a frame missing from it has no listener. */
+  function framedSetup(reply: (request: ContentRequest, frameId: number) => Promise<unknown> = async () => ({ ok: true, result: "ok" })) {
+    const frames = new Map<number, string[]>([[0, []]]);
+    const sent: { request: ContentRequest; frameId: number }[] = [];
+    const sendToTab = vi.fn<RunHostDeps["sendToTab"]>(async (_tabId, request, frameId) => {
+      sent.push({ request, frameId });
+      const names = frames.get(frameId);
+      if (!names) throw new Error("Could not establish connection. Receiving end does not exist.");
+      if (request.type === "list-tools") return names.map((name) => ({ name }));
+      return reply(request, frameId);
+    });
+    const host = createRunHost({ sendToTab, broadcast: () => {}, loadMacros: async () => [] });
+    return { host, frames, sent, toolHost: host.toolHost(TAB, new AbortController().signal) };
+  }
+
+  const callsTo = (sent: { request: ContentRequest; frameId: number }[]) =>
+    sent.filter(({ request }) => request.type === "execute-tool").map(({ frameId }) => frameId);
+
+  it("finds a tool an iframe reported and calls it in that frame", async () => {
+    const { host, frames, sent, toolHost } = framedSetup();
+    frames.set(IFRAME, ["inner"]);
+    host.setTools(TAB, [{ name: "inner" }], IFRAME, "https://widget.example");
+    await expect(toolHost.isToolAvailable("inner")).resolves.toBe(true);
+    await expect(toolHost.callTool("inner", {})).resolves.toBe("ok");
+    expect(callsTo(sent)).toEqual([IFRAME]);
+  });
+
+  it("prefers the top frame for a shared name unless frameOrigin names the iframe", async () => {
+    const { host, frames, sent, toolHost } = framedSetup();
+    frames.set(0, ["save"]);
+    frames.set(IFRAME, ["save"]);
+    host.setTools(TAB, [{ name: "save" }], 0, "https://app.example");
+    host.setTools(TAB, [{ name: "save" }], IFRAME, "https://widget.example");
+    await toolHost.callTool("save", {});
+    await toolHost.callTool("save", {}, "https://widget.example");
+    expect(callsTo(sent)).toEqual([0, IFRAME]);
+    await expect(toolHost.isToolAvailable("save", "https://other.example")).resolves.toBe(false);
+  });
+
+  it("polls known iframes and drops one that no longer answers", async () => {
+    const { host, frames, toolHost } = framedSetup();
+    frames.set(IFRAME, ["inner"]);
+    host.setTools(TAB, [{ name: "inner" }], IFRAME);
+    frames.delete(IFRAME);
+    await expect(toolHost.isToolAvailable("inner")).resolves.toBe(false);
+  });
+
+  it("after an iframe navigates, forgets its old tools but keeps the top frame's", async () => {
+    const { host, frames, toolHost } = framedSetup(async () => ({ ok: true, result: null, navigated: true }));
+    frames.set(0, ["top"]);
+    // The unloading iframe would still list its tool if it were asked.
+    frames.set(IFRAME, ["inner"]);
+    host.setTools(TAB, [{ name: "top" }], 0);
+    host.setTools(TAB, [{ name: "inner" }], IFRAME);
+    await expect(toolHost.callTool("inner", {})).resolves.toBeNull();
+    await expect(toolHost.isToolAvailable("inner")).resolves.toBe(false);
+    await expect(toolHost.isToolAvailable("top")).resolves.toBe(true);
+    const waiting = toolHost.waitForTool("next", 5000);
+    host.setTools(TAB, [{ name: "next" }], IFRAME);
+    await expect(waiting).resolves.toBeUndefined();
+  });
+
+  it("drops the iframes' tools when the top frame navigates", async () => {
+    const { host, frames, toolHost } = framedSetup(async () => ({ ok: true, result: null, navigated: true }));
+    frames.set(0, ["go"]);
+    frames.set(IFRAME, ["inner"]);
+    host.setTools(TAB, [{ name: "go" }], 0);
+    host.setTools(TAB, [{ name: "inner" }], IFRAME);
+    await toolHost.callTool("go", {});
+    // The old iframe would still answer a poll; it must not be asked.
+    host.setTools(TAB, [], 0);
+    await expect(toolHost.isToolAvailable("inner")).resolves.toBe(false);
+  });
+
+  it("sends abort-tool to every known frame on stop", () => {
+    const { host, sent } = framedSetup();
+    host.setTools(TAB, [], IFRAME);
+    host.stopRun(TAB);
+    expect(sent.filter(({ request }) => request.type === "abort-tool").map(({ frameId }) => frameId)).toEqual([0, IFRAME]);
+  });
+});
