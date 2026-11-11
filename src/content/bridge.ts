@@ -3,7 +3,7 @@
  * Vitest: `index.ts` wires it to the runtime channel and the WebMCP adapter.
  */
 import type { Json, ToolInfo } from "../macro/types";
-import type { BackgroundRequest, ContentRequest, ExecuteToolResponse } from "../messages";
+import type { ContentRequest, ExecuteToolResponse } from "../messages";
 import { ToolNotFoundError } from "../webmcp/adapter";
 
 /** The adapter functions the bridge uses, passed in so tests can fake them. */
@@ -74,17 +74,4 @@ export function createRequestHandler(tools: ToolAccess): RequestHandler {
         throw new Error(`Unknown request: ${JSON.stringify(request satisfies never)}`);
     }
   };
-}
-
-/**
- * Sends the page's current tools to the background. `matches` stays 0 until
- * trigger matching lands in the content script.
- */
-export async function reportTools(
-  listTools: ToolAccess["listTools"],
-  send: (request: BackgroundRequest) => Promise<unknown>,
-): Promise<void> {
-  const tools = await listTools().catch((): ToolInfo[] => []);
-  // Rejects when no extension page is listening; there is nothing to do then.
-  await send({ type: "tools-changed", tools, matches: 0 }).catch(() => {});
 }
