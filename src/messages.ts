@@ -6,7 +6,7 @@
 import type { Json, ToolInfo } from "./macro/types";
 import type { RunResult, StepInfo } from "./runner/interpreter";
 
-/** Background or side panel → content script of a tab (top frame). */
+/** Background or side panel → the content script of one frame of a tab. */
 export type ContentRequest =
   | { type: "list-tools" }
   | { type: "execute-tool"; name: string; args: Record<string, Json> }

@@ -1,6 +1,6 @@
 /**
- * The service worker's run host: one run per tab, a per-tab cache of tool
- * names, and the `ToolHost` that connects a run to its tab. Chrome is reached
+ * The service worker's run host: one run per tab, a cache of tool names per
+ * tab and frame, and the `ToolHost` that connects a run to its tab. Chrome is reached
  * only through `RunHostDeps`, so this module runs under Vitest in Node.
  */
 import { isExecuteToolResponse, isToolList, type ContentRequest, type RunEvent } from "../messages";
@@ -11,8 +11,8 @@ import type { RunStore } from "./runStore";
 import { createSiteRouter, type TabRouterDeps } from "./tabRouter";
 
 export interface RunHostDeps {
-  /** Sends to the tab's top-frame content script; rejects when no listener answers. */
-  sendToTab(tabId: number, request: ContentRequest): Promise<unknown>;
+  /** Sends to a frame's content script (0 is the top frame); rejects when no listener answers. */
+  sendToTab(tabId: number, request: ContentRequest, frameId: number): Promise<unknown>;
   /** Delivers a run event to the tab and to every extension page. */
   broadcast(event: RunEvent): void;
   loadMacros(): Promise<Macro[]>;
@@ -25,8 +25,8 @@ export interface RunHostDeps {
 }
 
 export interface RunHost {
-  /** Records the tools a tab's content script reported and wakes waiting runs. */
-  setTools(tabId: number, tools: ToolInfo[]): void;
+  /** Records the tools a frame's content script reported and wakes waiting runs. */
+  setTools(tabId: number, tools: ToolInfo[], frameId?: number, origin?: string): void;
   /** Runs the macro on the tab. Ignored while that tab already has a run. */
   startRun(tabId: number, macroId: string, inputs: Record<string, Json>): Promise<void>;
   /** Continues a run saved by an earlier worker. Ignored while that tab already has a run. */
@@ -39,53 +39,97 @@ export interface RunHost {
 
 /** The tool methods of a `ToolHost`, bound to one tab, so without a site. */
 export interface TabTools {
-  callTool(name: string, args: Record<string, Json>): Promise<Json>;
-  isToolAvailable(name: string): Promise<boolean>;
-  waitForTool(name: string, timeoutMs: number): Promise<void>;
+  callTool(name: string, args: Record<string, Json>, frameOrigin?: string): Promise<Json>;
+  isToolAvailable(name: string, frameOrigin?: string): Promise<boolean>;
+  waitForTool(name: string, timeoutMs: number, frameOrigin?: string): Promise<void>;
 }
 
 const DEFAULT_POLL_MS = 500;
 /** How long `isToolAvailable` waits for a newly loaded page to report its tools. */
 const DEFAULT_REPORT_TIMEOUT_MS = 10_000;
 
+interface FrameTools {
+  /** The frame's origin as Chrome reported it; unknown for a frame only ever polled. */
+  origin?: string;
+  names: string[];
+}
+
 export function createRunHost(deps: RunHostDeps): RunHost {
   const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
-  const toolsByTab = new Map<number, string[]>();
+  // Each frame runs its own content script and reports its own tools.
+  const framesByTab = new Map<number, Map<number, FrameTools>>();
   const waitersByTab = new Map<number, Set<() => void>>();
   const activeRuns = new Map<number, AbortController>();
   // The tabs each run has called tools on, keyed by the run's own tab, so
   // Stop reaches a call in flight on another site's tab too.
   const runTabs = new Map<number, Set<number>>();
-  // Tabs whose last tool call loaded another document. Until that document's
-  // content script sends `tools-changed`, the old page may still answer
-  // `list-tools` while it unloads, so neither its answers nor the cache count.
+  // Tabs whose last tool call loaded another top document. Until that
+  // document's content script sends `tools-changed`, the old page may still
+  // answer `list-tools` while it unloads, so neither its answers nor the cache count.
   const awaitingReport = new Set<number>();
 
-  const setTools = (tabId: number, tools: ToolInfo[]): void => {
-    awaitingReport.delete(tabId);
-    toolsByTab.set(tabId, tools.map((tool) => tool.name));
-    for (const wake of waitersByTab.get(tabId) ?? []) wake();
+  const frames = (tabId: number): Map<number, FrameTools> => {
+    const known = framesByTab.get(tabId) ?? new Map<number, FrameTools>();
+    framesByTab.set(tabId, known);
+    return known;
+  };
+
+  /** The top frame, which may not have reported yet, and every iframe that has. */
+  const frameIds = (tabId: number): Set<number> => new Set([0, ...(framesByTab.get(tabId)?.keys() ?? [])]);
+
+  const wake = (tabId: number): void => {
+    for (const check of waitersByTab.get(tabId) ?? []) check();
+  };
+
+  const setTools = (tabId: number, tools: ToolInfo[], frameId = 0, origin?: string): void => {
+    if (frameId === 0) awaitingReport.delete(tabId);
+    const known = frames(tabId);
+    known.set(frameId, { origin: origin ?? known.get(frameId)?.origin, names: tools.map((tool) => tool.name) });
+    wake(tabId);
+  };
+
+  const refreshFrame = async (tabId: number, frameId: number): Promise<void> => {
+    try {
+      const tools = await deps.sendToTab(tabId, { type: "list-tools" }, frameId);
+      // A navigation may have started while the listing was in flight.
+      const current = frameId === 0 ? !awaitingReport.has(tabId) : framesByTab.get(tabId)?.has(frameId);
+      if (isToolList(tools) && current) setTools(tabId, tools, frameId);
+    } catch {
+      // The top frame may still be loading: keep its cache. An iframe that
+      // does not answer was removed, or left for a page without WebMCP.
+      if (frameId !== 0 && framesByTab.get(tabId)?.delete(frameId)) wake(tabId);
+    }
   };
 
   const refreshTools = async (tabId: number): Promise<void> => {
     if (awaitingReport.has(tabId)) return;
-    try {
-      const tools = await deps.sendToTab(tabId, { type: "list-tools" });
-      // A navigation may have started while the listing was in flight.
-      if (isToolList(tools) && !awaitingReport.has(tabId)) setTools(tabId, tools);
-    } catch {
-      // No content script yet (the page is still loading): keep the cache.
-    }
+    await Promise.all([...frameIds(tabId)].map((frameId) => refreshFrame(tabId, frameId)));
   };
 
-  const navigated = (tabId: number): null => {
-    toolsByTab.delete(tabId);
-    awaitingReport.add(tabId);
+  const navigated = (tabId: number, frameId: number): null => {
+    if (frameId === 0) {
+      // A new top document replaces every iframe along with its tools.
+      framesByTab.delete(tabId);
+      awaitingReport.add(tabId);
+    } else {
+      // The rest of the page stays. The iframe is no longer polled, so its
+      // unloading document cannot answer; the new one reports when it loads.
+      framesByTab.get(tabId)?.delete(frameId);
+    }
     return null;
   };
 
-  const hasTool = (tabId: number, name: string): boolean =>
-    !awaitingReport.has(tabId) && (toolsByTab.get(tabId)?.includes(name) ?? false);
+  /** The frame that serves `name`: the top frame first, then the earliest iframe. */
+  const frameFor = (tabId: number, name: string, frameOrigin?: string): number | undefined => {
+    if (awaitingReport.has(tabId)) return undefined;
+    const candidates = [...(framesByTab.get(tabId) ?? [])]
+      .filter(([, frame]) => frame.names.includes(name) && (frameOrigin === undefined || frame.origin === frameOrigin))
+      .map(([id]) => id);
+    return candidates.length > 0 ? Math.min(...candidates) : undefined;
+  };
+
+  const hasTool = (tabId: number, name: string, frameOrigin?: string): boolean =>
+    frameFor(tabId, name, frameOrigin) !== undefined;
 
   /**
    * Resolves `true` once `ready()` holds, re-checked on every report and poll,
@@ -117,16 +161,16 @@ export function createRunHost(deps: RunHostDeps): RunHost {
     });
 
   const toolHost = (tabId: number, signal: AbortSignal): TabTools => ({
-    async isToolAvailable(name) {
+    async isToolAvailable(name, frameOrigin) {
       if (awaitingReport.has(tabId)) {
         await until(tabId, () => !awaitingReport.has(tabId), DEFAULT_REPORT_TIMEOUT_MS, signal);
       }
       await refreshTools(tabId);
-      return hasTool(tabId, name);
+      return hasTool(tabId, name, frameOrigin);
     },
 
-    async waitForTool(name, timeoutMs) {
-      if (await until(tabId, () => hasTool(tabId, name), timeoutMs, signal)) return;
+    async waitForTool(name, timeoutMs, frameOrigin) {
+      if (await until(tabId, () => hasTool(tabId, name, frameOrigin), timeoutMs, signal)) return;
       // A MacroRunError's message becomes the run's failure message.
       throw new MacroRunError(
         awaitingReport.has(tabId)
@@ -135,19 +179,21 @@ export function createRunHost(deps: RunHostDeps): RunHost {
       );
     },
 
-    async callTool(name, args) {
+    async callTool(name, args, frameOrigin) {
+      // Not in the cache: the top frame answers, with "not found" if need be.
+      const frameId = frameFor(tabId, name, frameOrigin) ?? 0;
       let response: unknown;
       try {
-        response = await deps.sendToTab(tabId, { type: "execute-tool", name, args });
+        response = await deps.sendToTab(tabId, { type: "execute-tool", name, args }, frameId);
       } catch {
         // The channel closed mid-call: the page unloaded under the tool.
-        return navigated(tabId);
+        return navigated(tabId, frameId);
       }
       if (response === undefined) return null;
       if (!isExecuteToolResponse(response)) throw new Error(`Invalid response from tool "${name}".`);
       if (!response.ok) throw new Error(response.error);
       // Whatever the tool returned, a call that loads another page is null to the macro.
-      return response.navigated ? navigated(tabId) : response.result;
+      return response.navigated ? navigated(tabId, frameId) : response.result;
     },
   });
 
@@ -176,14 +222,14 @@ export function createRunHost(deps: RunHostDeps): RunHost {
         return toolHost(id, controller.signal);
       };
       const host: ToolHost = {
-        isToolAvailable: async (name, site) => (await tabTools(site)).isToolAvailable(name),
-        waitForTool: async (name, timeoutMs, site) => (await tabTools(site)).waitForTool(name, timeoutMs),
-        async callTool(name, args, site) {
+        isToolAvailable: async (name, site, frameOrigin) => (await tabTools(site)).isToolAvailable(name, frameOrigin),
+        waitForTool: async (name, timeoutMs, site, frameOrigin) => (await tabTools(site)).waitForTool(name, timeoutMs, frameOrigin),
+        async callTool(name, args, site, frameOrigin) {
           const tools = await tabTools(site);
           inFlight = [...inFlight, name];
           // `state` is still the one before this step: a resume repeats the step.
           await deps.store?.save(tabId, state, inFlight);
-          return tools.callTool(name, args);
+          return tools.callTool(name, args, frameOrigin);
         },
         onStep: ({ count, tool }) => deps.broadcast({ type: "run-step", tabId, macroId, count, tool }),
         message: (text) => deps.broadcast({ type: "run-message", tabId, macroId, text }),
@@ -219,11 +265,13 @@ export function createRunHost(deps: RunHostDeps): RunHost {
     stopRun(tabId) {
       activeRuns.get(tabId)?.abort();
       // Also cancel a tool call in flight, which the signal cannot reach.
-      for (const id of runTabs.get(tabId) ?? [tabId]) deps.sendToTab(id, { type: "abort-tool" }).catch(() => {});
+      for (const id of runTabs.get(tabId) ?? [tabId]) {
+        for (const frameId of frameIds(id)) deps.sendToTab(id, { type: "abort-tool" }, frameId).catch(() => {});
+      }
     },
     removeTab(tabId) {
       activeRuns.get(tabId)?.abort();
-      toolsByTab.delete(tabId);
+      framesByTab.delete(tabId);
       waitersByTab.delete(tabId);
       awaitingReport.delete(tabId);
     },

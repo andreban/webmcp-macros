@@ -14,6 +14,6 @@ export default defineManifest({
   action: { default_title: "WebMCP Macros" },
   background: { service_worker: "src/background/index.ts", type: "module" },
   side_panel: { default_path: "src/sidepanel/index.html" },
-  // Top frame only (the default): the adapter lists only this document's tools.
-  content_scripts: [{ matches: ["<all_urls>"], run_at: "document_idle", js: ["src/content/index.ts"] }],
+  // Every frame: each lists and runs its own document's tools, so tools in iframes work too.
+  content_scripts: [{ matches: ["<all_urls>"], all_frames: true, run_at: "document_idle", js: ["src/content/index.ts"] }],
 });

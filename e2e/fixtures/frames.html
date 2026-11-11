@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Frames fixture</title>
+  </head>
+  <body>
+    <!--
+      The top page and an iframe on another origin (127.0.0.1 instead of
+      localhost) both register `whoami`; only the iframe registers
+      `stamp_inner`. Served at /frames; the iframe is /frames?inner.
+    -->
+    <p>Frame: <output id="frame"></output> · Stamped: <output id="stamped">no</output></p>
+    <script>
+      const inner = new URLSearchParams(location.search).has("inner");
+      document.getElementById("frame").textContent = inner ? "inner" : "top";
+      document.modelContext.registerTool({
+        name: "whoami",
+        description: "Says which frame answered.",
+        annotations: { readOnlyHint: true },
+        execute: () => ({ frame: inner ? "inner" : "top", origin: location.origin }),
+      });
+      if (inner) {
+        document.modelContext.registerTool({
+          name: "stamp_inner",
+          description: "Marks the iframe.",
+          execute: () => {
+            document.getElementById("stamped").textContent = "yes";
+            return { stamped: true };
+          },
+        });
+      } else {
+        const frame = document.createElement("iframe");
+        // A cross-origin iframe may use WebMCP only when the embedder delegates it.
+        frame.allow = "tools";
+        frame.src = `http://127.0.0.1:${location.port}/frames?inner`;
+        document.body.append(frame);
+      }
+    </script>
+  </body>
+</html>
