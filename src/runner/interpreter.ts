@@ -1,9 +1,11 @@
 /**
  * Runs a macro's program against a ToolHost. The host is the only way out:
  * the interpreter cannot evaluate code, touch the DOM or make network calls.
- * It is a plain async tree-walker over the macro JSON.
+ * It is a step machine over the macro JSON: `step` runs one statement of a
+ * `RunState` and returns the next state, and `runMacro` loops over it.
  */
 import type { BinaryOp, Expr, Json, Macro, Stmt } from "../macro/types";
+import { locate, type Frame, type Loop, type RunState } from "./machine";
 
 export interface ToolHost {
   /** Calls a tool by its page name. `null` means the call started a navigation. */
@@ -54,15 +56,44 @@ const DEFAULT_TOOL_TIMEOUT_MS = 10_000;
 const STOPPED_BY_USER = "Stopped by the user.";
 
 export async function runMacro(macro: Macro, host: ToolHost, options: RunOptions = {}): Promise<RunResult> {
-  const inputs = options.inputs ?? {};
-  const toolTimeoutMs = options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
-  const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
-  const { signal } = options;
+  let state = startRun(macro, options);
+  for (;;) {
+    if (state.status !== "running") {
+      const { status, message, toolCalls, vars } = state;
+      return { status, message, toolCalls, vars };
+    }
+    state = await step(state, host, options.signal);
+  }
+}
+
+/** The state of a run that has not executed anything yet. */
+export function startRun(macro: Macro, options: Omit<RunOptions, "signal"> = {}): RunState {
+  return {
+    status: "running",
+    macro,
+    inputs: options.inputs ?? {},
+    maxSteps: options.maxSteps ?? DEFAULT_MAX_STEPS,
+    toolTimeoutMs: options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+    frames: [{ pc: 0 }],
+    vars: {},
+    toolCalls: 0,
+    steps: 0,
+  };
+}
+
+/**
+ * Runs the next statement, or ends the block on top of the stack, and returns
+ * the next state. It never throws, and it leaves `state` unchanged so a caller
+ * can keep it. Expressions run whole within a step, tool calls included.
+ */
+export async function step(state: RunState, host: ToolHost, signal?: AbortSignal): Promise<RunState> {
+  if (state.status !== "running") return state;
+  const { macro, inputs, toolTimeoutMs, maxSteps } = state;
   // A Map, not an object: variable names come from shared macros, and names
   // such as "__proto__" must not reach Object.prototype.
-  const vars = new Map<string, Json>();
-  let toolCalls = 0;
-  let steps = 0;
+  const vars = new Map<string, Json>(Object.entries(state.vars));
+  const frames = [...state.frames];
+  let { toolCalls, steps } = state;
 
   const checkAborted = () => {
     if (signal?.aborted) throw new MacroRunError(STOPPED_BY_USER);
@@ -177,103 +208,145 @@ export async function runMacro(macro: Macro, host: ToolHost, options: RunOptions
     throw new MacroRunError(`Unknown expression: ${JSON.stringify(expr satisfies never)}`);
   };
 
-  const exec = async (body: Stmt[]): Promise<void> => {
-    for (const stmt of body) {
-      checkAborted();
-      switch (stmt.op) {
-        case "call": {
-          const result = await call(stmt.tool, stmt.args);
-          if (stmt.saveAs) vars.set(stmt.saveAs, result);
-          break;
-        }
-        case "set":
-          vars.set(stmt.var, await evaluate(stmt.value));
-          break;
-        case "if":
-          if (truthy(await evaluate(stmt.cond))) await exec(stmt.then);
-          else if (stmt.else) await exec(stmt.else);
-          break;
-        case "repeat": {
-          const times = Number(await evaluate(stmt.times));
-          for (let i = 0; i < times; i++) {
-            tick();
-            await exec(stmt.body);
-          }
-          break;
-        }
-        case "while":
-          while (truthy(await evaluate(stmt.cond))) {
-            tick();
-            await exec(stmt.body);
-          }
-          break;
-        case "forEach": {
-          const list = await evaluate(stmt.list);
-          if (!Array.isArray(list)) throw new MacroRunError("forEach needs a list.");
-          for (const item of list) {
-            tick();
-            vars.set(stmt.var, item);
-            await exec(stmt.body);
-          }
-          break;
-        }
-        case "waitForTool":
-          await waitFor(toolName(stmt.tool), stmt.timeoutMs ?? toolTimeoutMs);
-          break;
-        case "wait":
-          await sleep(stmt.ms, signal);
-          break;
-        case "message":
-          host.message?.(text(await evaluate(stmt.text)));
-          break;
-        case "stop":
-          throw new StopSignal(stmt.message ? text(await evaluate(stmt.message)) : undefined);
-        case "fail":
-          throw new MacroRunError(text(await evaluate(stmt.message)));
-        // The data statements store a new value instead of changing the old
-        // one in place: the old one may be a literal in the macro's program,
-        // which must read the same on the next run, or be held by another
-        // variable too.
-        case "setKey": {
-          const key = await evaluate(stmt.key);
-          const value = await evaluate(stmt.value);
-          const dict = readVar(stmt.var);
-          if (!isDict(dict)) throw new MacroRunError(`setKey needs a dictionary in "${stmt.var}", got ${kind(dict)}.`);
-          if (typeof key !== "string") throw new MacroRunError(`setKey needs a string key, got ${kind(key)}.`);
-          // fromEntries defines own properties, so a "__proto__" key stays a key.
-          vars.set(stmt.var, Object.fromEntries([...Object.entries(dict), [key, value]]));
-          break;
-        }
-        case "push": {
-          const value = await evaluate(stmt.value);
-          vars.set(stmt.var, [...readList("push", stmt.var), value]);
-          break;
-        }
-        case "popFront":
-        case "popBack": {
-          const list = readList(stmt.op, stmt.var);
-          const item = stmt.op === "popFront" ? list[0] : list[list.length - 1];
-          if (item === undefined) throw new MacroRunError(`${stmt.op} needs a non-empty list; "${stmt.var}" is empty.`);
-          vars.set(stmt.var, stmt.op === "popFront" ? list.slice(1) : list.slice(0, -1));
-          if (stmt.saveAs) vars.set(stmt.saveAs, item);
-          break;
-        }
-        default:
-          throw new MacroRunError(`Unknown statement: ${JSON.stringify(stmt satisfies never)}`);
-      }
-    }
+  // Frames are replaced, never changed, so the previous state stays intact.
+  const replaceTop = (frame: Frame) => {
+    frames[frames.length - 1] = frame;
+  };
+  const enter = (branch: NonNullable<Frame["branch"]>, loop?: Loop) => {
+    frames.push(loop ? { branch, pc: 0, loop } : { branch, pc: 0 });
   };
 
-  const result = (status: RunResult["status"], message?: string): RunResult => ({
+  const execute = async (): Promise<void> => {
+    const top = frames.at(-1);
+    const at = top && locate(macro.program, frames);
+    if (!top || !at) throw new MacroRunError("The saved run does not match its macro.");
+    const stmt = at.block[top.pc];
+    if (!stmt) return endBlock(top, at.owner);
+    checkAborted();
+    switch (stmt.op) {
+      case "call": {
+        const result = await call(stmt.tool, stmt.args);
+        if (stmt.saveAs) vars.set(stmt.saveAs, result);
+        break;
+      }
+      case "set":
+        vars.set(stmt.var, await evaluate(stmt.value));
+        break;
+      case "if": {
+        const branch = truthy(await evaluate(stmt.cond)) ? "then" : stmt.else ? "else" : undefined;
+        if (branch) return enter(branch);
+        break;
+      }
+      case "repeat": {
+        // Capped so the state stays JSON, which has no Infinity; the step
+        // limit ends the run before the cap is reached.
+        const times = Math.min(Number(await evaluate(stmt.times)), maxSteps + 1);
+        if (0 < times) {
+          tick();
+          return enter("body", { kind: "repeat", i: 0, times });
+        }
+        break;
+      }
+      case "while":
+        if (truthy(await evaluate(stmt.cond))) {
+          tick();
+          return enter("body", { kind: "while" });
+        }
+        break;
+      case "forEach": {
+        const items = await evaluate(stmt.list);
+        if (!Array.isArray(items)) throw new MacroRunError("forEach needs a list.");
+        const [first] = items;
+        if (first !== undefined) {
+          tick();
+          vars.set(stmt.var, first);
+          return enter("body", { kind: "forEach", i: 0, items });
+        }
+        break;
+      }
+      case "waitForTool":
+        await waitFor(toolName(stmt.tool), stmt.timeoutMs ?? toolTimeoutMs);
+        break;
+      case "wait":
+        await sleep(stmt.ms, signal);
+        break;
+      case "message":
+        host.message?.(text(await evaluate(stmt.text)));
+        break;
+      case "stop":
+        throw new StopSignal(stmt.message ? text(await evaluate(stmt.message)) : undefined);
+      case "fail":
+        throw new MacroRunError(text(await evaluate(stmt.message)));
+      // The data statements store a new value instead of changing the old
+      // one in place: the old one may be a literal in the macro's program,
+      // which must read the same on the next run, or be held by another
+      // variable too.
+      case "setKey": {
+        const key = await evaluate(stmt.key);
+        const value = await evaluate(stmt.value);
+        const dict = readVar(stmt.var);
+        if (!isDict(dict)) throw new MacroRunError(`setKey needs a dictionary in "${stmt.var}", got ${kind(dict)}.`);
+        if (typeof key !== "string") throw new MacroRunError(`setKey needs a string key, got ${kind(key)}.`);
+        // fromEntries defines own properties, so a "__proto__" key stays a key.
+        vars.set(stmt.var, Object.fromEntries([...Object.entries(dict), [key, value]]));
+        break;
+      }
+      case "push": {
+        const value = await evaluate(stmt.value);
+        vars.set(stmt.var, [...readList("push", stmt.var), value]);
+        break;
+      }
+      case "popFront":
+      case "popBack": {
+        const list = readList(stmt.op, stmt.var);
+        const item = stmt.op === "popFront" ? list[0] : list[list.length - 1];
+        if (item === undefined) throw new MacroRunError(`${stmt.op} needs a non-empty list; "${stmt.var}" is empty.`);
+        vars.set(stmt.var, stmt.op === "popFront" ? list.slice(1) : list.slice(0, -1));
+        if (stmt.saveAs) vars.set(stmt.saveAs, item);
+        break;
+      }
+      default:
+        throw new MacroRunError(`Unknown statement: ${JSON.stringify(stmt satisfies never)}`);
+    }
+    replaceTop({ ...top, pc: top.pc + 1 });
+  };
+
+  // The end of a block either starts the next loop iteration or returns to
+  // the statement after the block's owner.
+  const endBlock = async (top: Frame, owner: Stmt | undefined): Promise<void> => {
+    const { loop } = top;
+    if (loop?.kind === "repeat" && loop.i + 1 < loop.times) {
+      tick();
+      return replaceTop({ ...top, pc: 0, loop: { ...loop, i: loop.i + 1 } });
+    }
+    if (loop?.kind === "while" && owner?.op === "while" && truthy(await evaluate(owner.cond))) {
+      tick();
+      return replaceTop({ ...top, pc: 0 });
+    }
+    const item = loop?.kind === "forEach" ? loop.items[loop.i + 1] : undefined;
+    if (loop?.kind === "forEach" && owner?.op === "forEach" && item !== undefined) {
+      tick();
+      vars.set(owner.var, item);
+      return replaceTop({ ...top, pc: 0, loop: { ...loop, i: loop.i + 1 } });
+    }
+    frames.pop();
+    const parent = frames.at(-1);
+    if (parent) replaceTop({ ...parent, pc: parent.pc + 1 });
+  };
+
+  const result = (status: RunState["status"], message?: string): RunState => ({
+    ...state,
     status,
     message,
+    frames,
     toolCalls,
+    steps,
     vars: Object.fromEntries(vars),
   });
 
   try {
-    await exec(macro.program);
-    return result("done");
+    await execute();
+    return result(frames.length > 0 ? "running" : "done");
   } catch (error: unknown) {
     if (error instanceof StopSignal) return result("stopped", error.message);
     return result("failed", error instanceof Error ? error.message : String(error));
