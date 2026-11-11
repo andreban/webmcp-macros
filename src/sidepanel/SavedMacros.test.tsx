@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { sampleMacros } from "../samples";
-import { SavedMacros } from "./SavedMacros";
+import { openEditor, SavedMacros } from "./SavedMacros";
 
 describe("SavedMacros", () => {
   it("points to the importer when nothing is saved", () => {
@@ -17,7 +17,27 @@ describe("SavedMacros", () => {
     expect(html.match(/class="wmm-program"/g)).toHaveLength(sampleMacros.length);
     expect(html.match(/<button type="button"[^>]*>Copy share string<\/button>/g)).toHaveLength(sampleMacros.length);
     expect(html.match(/<button type="button"[^>]*>Delete<\/button>/g)).toHaveLength(sampleMacros.length);
+    expect(html.match(/<button type="button"[^>]*>Edit<\/button>/g)).toHaveLength(sampleMacros.length);
+    expect(html.match(/<button type="button"[^>]*>New macro<\/button>/g)).toHaveLength(1);
     // The copy confirmation needs a live region that exists before it changes.
     expect(html.match(/role="status"/g)).toHaveLength(sampleMacros.length);
+  });
+});
+
+describe("openEditor", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("opens the editor in a new tab, for a saved or a new macro, against the active tab", async () => {
+    const create = vi.fn(async (_: { url: string }) => ({}));
+    vi.stubGlobal("chrome", {
+      tabs: { query: vi.fn(async () => [{ id: 7 }]), create },
+      runtime: { getURL: (path: string) => `chrome-extension://ext/${path}` },
+    });
+    await openEditor("m1");
+    await openEditor();
+    expect(create.mock.calls).toEqual([
+      [{ url: "chrome-extension://ext/src/editor/index.html?macro=m1&tab=7" }],
+      [{ url: "chrome-extension://ext/src/editor/index.html?tab=7" }],
+    ]);
   });
 });

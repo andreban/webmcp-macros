@@ -5,5 +5,7 @@ import manifest from "./manifest.config.ts";
 
 export default defineConfig({
   plugins: [react(), crx({ manifest })],
+  // Pages the manifest does not name (crxjs builds only those) are listed here.
+  build: { rolldownOptions: { input: { editor: "src/editor/index.html" } } },
   test: { environment: "node", include: ["src/**/*.test.{ts,tsx}"], passWithNoTests: true },
 });

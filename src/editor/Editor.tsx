@@ -1,0 +1,205 @@
+import { type Dispatch, type KeyboardEvent as ReactKeyboardEvent, useEffect, useReducer, useState } from "react";
+import type { Macro } from "../macro/types";
+import { loadMacros, saveMacro } from "../storage";
+import { ProgramView } from "../ui/ProgramView";
+import { createNewMacro, type EditorParams, editorPath, historyShortcut, isDirty } from "./page";
+import { createEditorState, type EditorAction, editorReducer, type EditorState } from "./state";
+
+type Loaded =
+  | { status: "loading" }
+  | { status: "missing" }
+  | { status: "ready"; macro: Macro; isNew: boolean };
+
+/** The editor page: loads the macro its URL names, or starts a new one for the tab's site. */
+export function EditorPage({ params }: { params: EditorParams }) {
+  const [loaded, setLoaded] = useState<Loaded>({ status: "loading" });
+  useEffect(() => {
+    let active = true;
+    void loadInitial(params).then(
+      (next) => active && setLoaded(next),
+      () => active && setLoaded({ status: "missing" }),
+    );
+    return () => {
+      active = false;
+    };
+  }, [params]);
+
+  if (loaded.status === "loading") return <main aria-busy="true" />;
+  if (loaded.status === "missing") {
+    return (
+      <main>
+        <h1>Macro not found</h1>
+        <p>This macro is no longer saved.</p>
+        <a href={`/${editorPath({ tabId: params.tabId })}`}>Start a new macro</a>
+      </main>
+    );
+  }
+  return <EditorSession initial={loaded.macro} isNew={loaded.isNew} tabId={params.tabId} />;
+}
+
+async function loadInitial({ macroId, tabId }: EditorParams): Promise<Loaded> {
+  if (macroId !== undefined) {
+    const macro = (await loadMacros()).find((saved) => saved.id === macroId);
+    return macro ? { status: "ready", macro, isNew: false } : { status: "missing" };
+  }
+  // The tab may have closed since the side panel linked here; then the site starts empty.
+  const url = tabId === undefined ? undefined : await chrome.tabs.get(tabId).then((tab) => tab.url, () => undefined);
+  return { status: "ready", macro: createNewMacro(url), isNew: true };
+}
+
+/** Holds one macro's editing session: history, the saved baseline, saving and shortcuts. */
+function EditorSession({ initial, isNew, tabId }: { initial: Macro; isNew: boolean; tabId: number | undefined }) {
+  const [state, dispatch] = useReducer(editorReducer, initial, createEditorState);
+  // A new macro starts unsaved but unchanged, so leaving it untouched does not warn.
+  const [baseline, setBaseline] = useState(initial);
+  const [everSaved, setEverSaved] = useState(!isNew);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const dirty = isDirty(state.macro, baseline);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Inside a text field the keys undo typing, as users expect there.
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      const action = historyShortcut(event);
+      if (!action) return;
+      event.preventDefault();
+      dispatch({ type: action });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
+  const save = async () => {
+    const macro = state.macro;
+    setSaving(true);
+    setError("");
+    try {
+      await saveMacro(macro);
+      setBaseline(macro);
+      setEverSaved(true);
+      // A reload now reopens the saved macro instead of starting another new one.
+      history.replaceState(null, "", `/${editorPath({ macroId: macro.id, tabId })}`);
+    } catch (caught) {
+      setError(`Could not save: ${caught instanceof Error ? caught.message : String(caught)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const status = saving ? "Saving…" : error || (dirty || !everSaved ? "Unsaved changes" : "All changes saved");
+  return (
+    <EditorView
+      state={state}
+      dispatch={dispatch}
+      status={status}
+      canSave={!saving && (dirty || !everSaved)}
+      onSave={() => void save()}
+    />
+  );
+}
+
+export interface EditorViewProps {
+  state: EditorState;
+  /** Every edit goes through the reducer; later panels receive this too. */
+  dispatch: Dispatch<EditorAction>;
+  /** Announced through `role="status"`. */
+  status: string;
+  canSave: boolean;
+  onSave: () => void;
+}
+
+/** The editor's layout, from state passed in, so it renders without `chrome.*`. */
+export function EditorView({ state, dispatch, status, canSave, onSave }: EditorViewProps) {
+  const { macro } = state;
+  return (
+    <main className="editor">
+      <title>{`${macro.name || "Untitled macro"} · WebMCP Macros`}</title>
+      <header className="toolbar">
+        <h1>Edit macro</h1>
+        <span role="status" className="status">
+          {status}
+        </span>
+        <button
+          type="button"
+          className="secondary"
+          disabled={state.past.length === 0}
+          aria-keyshortcuts="Control+Z Meta+Z"
+          onClick={() => dispatch({ type: "undo" })}
+        >
+          Undo
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          disabled={state.future.length === 0}
+          aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z Control+Y"
+          onClick={() => dispatch({ type: "redo" })}
+        >
+          Redo
+        </button>
+        <button type="button" disabled={!canSave} onClick={onSave}>
+          Save
+        </button>
+      </header>
+      <MetaField label="Name" value={macro.name} onCommit={(name) => dispatch({ type: "setMeta", meta: { name } })} />
+      <MetaField
+        label="Description"
+        multiline
+        value={macro.description ?? ""}
+        onCommit={(text) => dispatch({ type: "setMeta", meta: { description: text || undefined } })}
+      />
+      {/* Inputs (#34) and sites and trigger (#35) panels go here. */}
+      <section aria-labelledby="program-heading">
+        <h2 id="program-heading">Program</h2>
+        {/* Read-only until statement editing (#31) replaces it with editable blocks. */}
+        <ProgramView macro={macro} />
+      </section>
+    </main>
+  );
+}
+
+/**
+ * A text field that commits on blur or Enter, so a word typed is one undo
+ * step rather than one per keystroke. The draft is transient UI state; it
+ * shows the macro's value whenever no edit is in progress (after undo, too).
+ */
+function MetaField({
+  label,
+  value,
+  multiline = false,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  multiline?: boolean;
+  onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft !== null && draft !== value) onCommit(draft);
+    setDraft(null);
+  };
+  const field = {
+    value: draft ?? value,
+    onChange: (event: { target: { value: string } }) => setDraft(event.target.value),
+    onBlur: commit,
+    onKeyDown: (event: ReactKeyboardEvent) => {
+      if (event.key === "Escape") setDraft(null);
+      else if (event.key === "Enter" && (!multiline || event.ctrlKey || event.metaKey)) commit();
+    },
+  };
+  return (
+    <label className="field">
+      <span>{label}</span>
+      {multiline ? <textarea rows={2} {...field} /> : <input type="text" {...field} />}
+    </label>
+  );
+}
