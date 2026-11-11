@@ -30,6 +30,20 @@ describe("defaultTrigger", () => {
     });
   });
 
+  it("finds calls inside data statements and expressions", () => {
+    const macro: Macro = {
+      ...twoSites,
+      program: [
+        { op: "set", var: "d", value: { obj: {} } },
+        { op: "setKey", var: "d", key: { lit: "k" }, value: { call: "one" } },
+        { op: "push", var: "d", value: { length: { call: "two" } } },
+        { op: "popBack", var: "d" },
+        { op: "message", text: { getKey: { var: "d" }, key: { call: "later" } } },
+      ],
+    };
+    expect(defaultTrigger(macro)).toEqual({ site: "a", anyOf: [["one", "two", "later"]] });
+  });
+
   it("stops at a waitForTool nested in a branch and skips tools of other sites", () => {
     const macro: Macro = {
       ...twoSites,
