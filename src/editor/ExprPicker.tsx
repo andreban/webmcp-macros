@@ -59,7 +59,7 @@ export function variableNames(program: readonly Stmt[]): string[] {
   const visit = (body: readonly Stmt[]): void => {
     for (const stmt of body) {
       if (stmt.op === "set" || stmt.op === "forEach") names.add(stmt.var);
-      if (stmt.op === "call" && stmt.saveAs) names.add(stmt.saveAs);
+      if ((stmt.op === "call" || stmt.op === "popFront" || stmt.op === "popBack") && stmt.saveAs) names.add(stmt.saveAs);
       if (stmt.op === "if") visit([...stmt.then, ...(stmt.else ?? [])]);
       if ("body" in stmt) visit(stmt.body);
     }
@@ -98,6 +98,17 @@ const CHOICES: { [K in ExprKind]: (ctx: Context) => { label: string; expr: ExprO
   list: () => [{ label: "List", expr: createDefaultExpr("list") }],
   toolAvailable: ({ tool }) => [{ label: "Whether a tool is available", expr: { toolAvailable: tool } }],
   call: ({ tool }) => [{ label: "Result of a tool", expr: { call: tool, args: {} } }],
+  callProc: ({ macro }) => {
+    const names = Object.keys(macro.procedures ?? {});
+    return names.length > 0
+      ? names.map((name) => ({ label: `Result of procedure: ${name}`, expr: { callProc: name, args: {} } }))
+      : [{ label: "Result of a procedure", expr: createDefaultExpr("callProc") }];
+  },
+  getKey: ({ inner }) => [{ label: "Item or key of this value", expr: { ...createDefaultExpr("getKey"), getKey: inner } }],
+  hasKey: ({ inner }) => [{ label: "Whether this value has a key", expr: { ...createDefaultExpr("hasKey"), hasKey: inner } }],
+  length: ({ inner }) => [{ label: "Length of this value", expr: { length: inner } }],
+  contains: ({ inner }) => [{ label: "Whether this value contains an item", expr: { ...createDefaultExpr("contains"), contains: inner } }],
+  keys: ({ inner }) => [{ label: "Keys of this dictionary", expr: { keys: inner } }],
 };
 
 /** Everything a slot can hold, in the order the picker lists it. */
