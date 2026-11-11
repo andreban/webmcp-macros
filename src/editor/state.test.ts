@@ -7,6 +7,7 @@ import {
   getNode,
   inputKeyError,
   inputReferences,
+  isOptionalSlot,
   moveTarget,
   type EditorAction,
   type EditorState,
@@ -180,6 +181,15 @@ describe("editorReducer", () => {
     const noArgs = run(start, { type: "clearSlot", at: ["program", 3, "args"] });
     expect(noArgs.macro.program[3]).toEqual({ op: "call", tool: "look" });
     expect(run(noArgs, { type: "undo" }).macro).toBe(start.macro);
+  });
+
+  it("knows which statement fields may be absent", () => {
+    expect(isOptionalSlot("return", "value")).toBe(true);
+    expect(isOptionalSlot("if", "else")).toBe(true);
+    expect(isOptionalSlot("if", "then")).toBe(false);
+    expect(isOptionalSlot("set", "value")).toBe(false);
+    const start = createEditorState({ ...sample(), program: [{ op: "return", value: { lit: 1 } }] });
+    expect(run(start, { type: "clearSlot", at: ["program", 0, "value"] }).macro.program[0]).toEqual({ op: "return" });
   });
 
   it("updates metadata and ignores a patch that changes nothing", () => {
