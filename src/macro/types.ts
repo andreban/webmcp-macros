@@ -66,7 +66,7 @@ export type BinaryOp =
   | "and"
   | "or";
 
-/** Expressions produce a value and, apart from `call`, have no side effects. */
+/** Expressions produce a value and, apart from `call` and `callProc`, have no side effects. */
 export type Expr =
   | { lit: Json }
   | { input: string }
@@ -78,6 +78,8 @@ export type Expr =
   | { list: Expr[] }
   | { toolAvailable: string }
   | { call: string; args?: Record<string, Expr> }
+  /** Runs a procedure of `Macro.procedures`; args are keyed by parameter name. */
+  | { callProc: string; args?: Record<string, Expr> }
   // Data operations. A key is a string for a dictionary or an integer index
   // for a list; a missing key reads as null, like `get`.
   | { getKey: Expr; key: Expr }
@@ -107,7 +109,19 @@ export type Stmt =
   /** Removes the first item, as from a queue; saves it in `saveAs` when given. */
   | { op: "popFront"; var: string; saveAs?: string }
   /** Removes the last item, as from a stack; saves it in `saveAs` when given. */
-  | { op: "popBack"; var: string; saveAs?: string };
+  | { op: "popBack"; var: string; saveAs?: string }
+  /** Ends the current procedure call with `value`, or null. */
+  | { op: "return"; value?: Expr };
+
+/**
+ * A procedure sees only its parameters and the variables it sets, never the
+ * caller's; parameters without an argument are null. A body that ends without
+ * `return` returns null.
+ */
+export interface MacroProcedure {
+  params: string[];
+  body: Stmt[];
+}
 
 export interface Macro {
   wmm: typeof MACRO_VERSION;
@@ -118,6 +132,7 @@ export interface Macro {
   tools: Record<string, MacroTool>;
   trigger: MacroTrigger;
   inputs?: MacroInput[];
+  procedures?: Record<string, MacroProcedure>;
   program: Stmt[];
 }
 
@@ -143,6 +158,7 @@ export function isMacro(value: unknown): value is Macro {
     typeof m.trigger === "object" &&
     m.trigger !== null &&
     Array.isArray(m.trigger.anyOf) &&
-    Array.isArray(m.program)
+    Array.isArray(m.program) &&
+    (m.procedures === undefined || (typeof m.procedures === "object" && m.procedures !== null))
   );
 }

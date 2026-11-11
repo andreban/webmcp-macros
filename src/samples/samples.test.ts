@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isMacro, type Expr, type Macro, type Stmt } from "../macro/types";
-import { flightSearchMacro, rocketLauncherMacro, sampleMacros } from "./index";
+import { adventureMacro, flightSearchMacro, rocketLauncherMacro, sampleMacros } from "./index";
 
 /** Every tool alias and input key a program refers to, at any depth. */
 interface References {
@@ -31,6 +31,8 @@ function walkExpr(expr: Expr, refs: References): void {
     refs.tools.add(expr.toolAvailable);
   } else if ("call" in expr) {
     refs.tools.add(expr.call);
+    walkArgs(expr.args, refs);
+  } else if ("callProc" in expr) {
     walkArgs(expr.args, refs);
   } else if ("getKey" in expr || "hasKey" in expr) {
     walkExpr("getKey" in expr ? expr.getKey : expr.hasKey, refs);
@@ -93,6 +95,9 @@ function walkStmts(stmts: Stmt[], refs: References): void {
       case "push":
         walkExpr(stmt.value, refs);
         break;
+      case "return":
+        if (stmt.value) walkExpr(stmt.value, refs);
+        break;
       case "wait":
       case "popFront":
       case "popBack":
@@ -146,8 +151,8 @@ describe("references", () => {
 });
 
 describe("sample macros", () => {
-  it("bundles both acceptance macros", () => {
-    expect(sampleMacros).toEqual([rocketLauncherMacro, flightSearchMacro]);
+  it("bundles the acceptance macros", () => {
+    expect(sampleMacros).toEqual([rocketLauncherMacro, flightSearchMacro, adventureMacro]);
   });
 
   it("have unique ids", () => {

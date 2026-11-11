@@ -5,7 +5,7 @@
  * `RunState` and returns the next state, and `runMacro` loops over it.
  */
 import type { BinaryOp, Expr, Json, Macro, Stmt } from "../macro/types";
-import { locate, type Frame, type Loop, type RunState } from "./machine";
+import { callBase, locate, type Frame, type Loop, type RunState } from "./machine";
 
 export interface ToolHost {
   /** Calls a tool by its page name. `null` means the call started a navigation. */
@@ -50,6 +50,11 @@ class StopSignal {
   constructor(readonly message?: string) {}
 }
 
+/** Thrown to leave the current statement and enter a procedure call; not an error. */
+class CallSignal {
+  constructor(readonly call: NonNullable<Frame["call"]>) {}
+}
+
 /** The step limit when `RunOptions.maxSteps` is not given. */
 export const DEFAULT_MAX_STEPS = 3000;
 const DEFAULT_TOOL_TIMEOUT_MS = 10_000;
@@ -84,16 +89,35 @@ export function startRun(macro: Macro, options: Omit<RunOptions, "signal"> = {})
 /**
  * Runs the next statement, or ends the block on top of the stack, and returns
  * the next state. It never throws, and it leaves `state` unchanged so a caller
- * can keep it. Expressions run whole within a step, tool calls included.
+ * can keep it. Expressions run whole within a step, tool calls included, up to
+ * the first procedure call: that step enters the procedure, and the statement
+ * runs again once it returns (see `machine.ts`).
  */
 export async function step(state: RunState, host: ToolHost, signal?: AbortSignal): Promise<RunState> {
   if (state.status !== "running") return state;
   const { macro, inputs, toolTimeoutMs, maxSteps } = state;
+  const frames = [...state.frames];
+  // The scope is the innermost procedure call's, or the program's. `base`
+  // becomes -1 when that call returns, and its variables are dropped.
+  let base = callBase(frames);
+  const inProc = base >= 0;
   // A Map, not an object: variable names come from shared macros, and names
   // such as "__proto__" must not reach Object.prototype.
-  const vars = new Map<string, Json>(Object.entries(state.vars));
-  const frames = [...state.frames];
+  const vars = new Map<string, Json>(Object.entries(frames[base]?.call?.locals ?? state.vars));
   let { toolCalls, steps } = state;
+  const results: Record<string, Json> = { ...frames.at(-1)?.results };
+  let nextSlot = 0;
+
+  // A statement replayed after a procedure call does not repeat the calls it
+  // made before: their results are kept by slot, in the order calls start.
+  const once = async (run: (slot: number) => Promise<Json>): Promise<Json> => {
+    const slot = nextSlot++;
+    const kept = ownValue(results, String(slot));
+    if (kept !== undefined) return kept;
+    const value = await run(slot);
+    results[slot] = value;
+    return value;
+  };
 
   const checkAborted = () => {
     if (signal?.aborted) throw new MacroRunError(STOPPED_BY_USER);
@@ -109,7 +133,9 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
   const waitFor = async (name: string, timeoutMs: number): Promise<void> => {
     try {
       await host.waitForTool(name, timeoutMs);
-    } catch {
+    } catch (error: unknown) {
+      // A host that knows why the tool is missing says so with a MacroRunError.
+      if (error instanceof MacroRunError) throw error;
       throw new MacroRunError(`Tool "${name}" never became available.`);
     }
   };
@@ -122,15 +148,30 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
 
   // Tools register and unregister as the page changes state, so every call
   // waits for its tool instead of assuming an earlier listing still holds.
-  const call = async (alias: string, argExprs: Record<string, Expr> = {}): Promise<Json> => {
-    tick();
-    const name = toolName(alias);
-    const args = await evaluateRecord(argExprs);
-    await waitFor(name, toolTimeoutMs);
-    toolCalls++;
-    host.onStep?.({ count: toolCalls, tool: name, args });
-    return host.callTool(name, args);
-  };
+  const call = (alias: string, argExprs: Record<string, Expr> = {}): Promise<Json> =>
+    once(async () => {
+      const name = toolName(alias);
+      const args = await evaluateRecord(argExprs);
+      // Counted after the arguments, which may enter a procedure and replay this call.
+      tick();
+      await waitFor(name, toolTimeoutMs);
+      toolCalls++;
+      host.onStep?.({ count: toolCalls, tool: name, args });
+      return host.callTool(name, args);
+    });
+
+  const callProc = (procName: string, argExprs: Record<string, Expr> = {}): Promise<Json> =>
+    once(async (slot) => {
+      const proc = ownValue(macro.procedures ?? {}, procName);
+      if (!proc) throw new MacroRunError(`Unknown procedure "${procName}".`);
+      const args = await evaluateRecord(argExprs);
+      const extra = Object.keys(args).find((key) => !proc.params.includes(key));
+      if (extra !== undefined) throw new MacroRunError(`Procedure "${procName}" has no parameter "${extra}".`);
+      // Every call counts, so runaway recursion ends at the step limit.
+      tick();
+      const locals = Object.fromEntries(proc.params.map((param) => [param, ownValue(args, param) ?? null]));
+      throw new CallSignal({ proc: procName, slot, locals });
+    });
 
   const evaluateRecord = async (exprs: Record<string, Expr>): Promise<Record<string, Json>> => {
     const entries: [string, Json][] = [];
@@ -175,8 +216,10 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
       for (const item of expr.list) out.push(await evaluate(item));
       return out;
     }
-    if ("toolAvailable" in expr) return host.isToolAvailable(toolName(expr.toolAvailable));
+    // Kept like call results, so a replayed statement takes the same branches.
+    if ("toolAvailable" in expr) return once(() => host.isToolAvailable(toolName(expr.toolAvailable)));
     if ("call" in expr) return call(expr.call, expr.args);
+    if ("callProc" in expr) return callProc(expr.callProc, expr.args);
     if ("getKey" in expr) return lookup("getKey", await evaluate(expr.getKey), await evaluate(expr.key)) ?? null;
     if ("hasKey" in expr) return lookup("hasKey", await evaluate(expr.hasKey), await evaluate(expr.key)) !== undefined;
     if ("length" in expr) {
@@ -209,8 +252,17 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
   };
 
   // Frames are replaced, never changed, so the previous state stays intact.
-  const replaceTop = (frame: Frame) => {
+  // Moving `pc` drops the results kept for replaying the statement it left.
+  const replaceTop = ({ results: _left, ...frame }: Frame) => {
     frames[frames.length - 1] = frame;
+  };
+  // Pops the call's frames and hands `value` to the statement that made it.
+  const returnFrom = (value: Json) => {
+    const slot = frames[base]?.call?.slot ?? 0;
+    frames.length = base;
+    base = -1;
+    const caller = frames.at(-1);
+    if (caller) frames[frames.length - 1] = { ...caller, results: { ...caller.results, [slot]: value } };
   };
   const enter = (branch: NonNullable<Frame["branch"]>, loop?: Loop) => {
     frames.push(loop ? { branch, pc: 0, loop } : { branch, pc: 0 });
@@ -218,7 +270,7 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
 
   const execute = async (): Promise<void> => {
     const top = frames.at(-1);
-    const at = top && locate(macro.program, frames);
+    const at = top && locate(macro, frames);
     if (!top || !at) throw new MacroRunError("The saved run does not match its macro.");
     const stmt = at.block[top.pc];
     if (!stmt) return endBlock(top, at.owner);
@@ -296,6 +348,9 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
         vars.set(stmt.var, [...readList("push", stmt.var), value]);
         break;
       }
+      case "return":
+        if (base < 0) throw new MacroRunError("return can only be used inside a procedure.");
+        return returnFrom(stmt.value ? await evaluate(stmt.value) : null);
       case "popFront":
       case "popBack": {
         const list = readList(stmt.op, stmt.var);
@@ -329,25 +384,29 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
       vars.set(owner.var, item);
       return replaceTop({ ...top, pc: 0, loop: { ...loop, i: loop.i + 1 } });
     }
+    if (top.call) return returnFrom(null);
     frames.pop();
     const parent = frames.at(-1);
     if (parent) replaceTop({ ...parent, pc: parent.pc + 1 });
   };
 
-  const result = (status: RunState["status"], message?: string): RunState => ({
-    ...state,
-    status,
-    message,
-    frames,
-    toolCalls,
-    steps,
-    vars: Object.fromEntries(vars),
-  });
+  const result = (status: RunState["status"], message?: string): RunState => {
+    const scope = frames[base];
+    if (scope?.call) frames[base] = { ...scope, call: { ...scope.call, locals: Object.fromEntries(vars) } };
+    const globals = inProc ? state.vars : Object.fromEntries(vars);
+    return { ...state, status, message, frames, toolCalls, steps, vars: globals };
+  };
 
   try {
     await execute();
     return result(frames.length > 0 ? "running" : "done");
   } catch (error: unknown) {
+    if (error instanceof CallSignal) {
+      const top = frames.at(-1);
+      if (top) frames[frames.length - 1] = { ...top, results };
+      frames.push({ pc: 0, call: error.call });
+      return result("running");
+    }
     if (error instanceof StopSignal) return result("stopped", error.message);
     return result("failed", error instanceof Error ? error.message : String(error));
   }

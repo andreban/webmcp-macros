@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { encodeMacro } from "../macro/codec";
 import type { Macro } from "../macro/types";
+import { editorPath } from "../editor/page";
 import { deleteMacro, loadMacros, onMacrosChanged } from "../storage";
 import { ProgramView } from "../ui/ProgramView";
 
@@ -33,11 +34,24 @@ export function useSavedMacros(): Macro[] {
   return macros;
 }
 
-/** Saved macros as expandable cards with their block view, share and delete. */
+/**
+ * Opens the editor in a new tab for `macroId`, or for a new macro, against the
+ * tab the side panel is showing (a new macro takes that tab's site).
+ */
+export async function openEditor(macroId?: string): Promise<void> {
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  await chrome.tabs.create({ url: chrome.runtime.getURL(editorPath({ macroId, tabId: active?.id })) });
+}
+
+/** Saved macros as expandable cards with their block view, edit, share and delete. */
 export function SavedMacros({ macros }: { macros: readonly Macro[] }) {
   return (
     <section aria-labelledby="saved-heading">
       <h2 id="saved-heading">Saved macros</h2>
+      {/* Opening a tab fails only when the extension context is gone; nothing is left to tell then. */}
+      <button type="button" className="secondary" onClick={() => void openEditor().catch(() => {})}>
+        New macro
+      </button>
       {macros.length === 0 ? (
         <p className="muted">Nothing saved yet. Import a macro below.</p>
       ) : (
@@ -94,6 +108,13 @@ function MacroCard({ macro }: { macro: Macro }) {
         </span>
         <button type="button" className="secondary" onClick={() => void remove()}>
           Delete
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => void openEditor(macro.id).catch(() => setNotice({ text: "Could not open the editor", failed: true }))}
+        >
+          Edit
         </button>
         <button type="button" onClick={() => void share()}>
           Copy share string

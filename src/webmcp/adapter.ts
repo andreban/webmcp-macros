@@ -93,7 +93,9 @@ function rejectedObjectInput(error: unknown): boolean {
  * everything else reduced to what JSON can represent.
  */
 function toJson(result: unknown): Json {
-  if (result === undefined || result === null) return null;
+  // Chrome 153 hands back the text "undefined" for a tool that returns
+  // nothing. A tool returning that bare word as text reads as null too.
+  if (result === undefined || result === null || result === "undefined") return null;
   if (typeof result === "string") {
     try {
       // JSON.parse only produces JSON values.
