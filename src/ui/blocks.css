@@ -1,0 +1,43 @@
+/*
+ * Blocks for ProgramView. Everything is namespaced under `wmm-` and the
+ * colours are custom properties on `.wmm-program`, so the same rules work in
+ * the side panel and inside the launcher's shadow root. Colour marks the
+ * block's category; the leading verb carries the same information in text.
+ */
+.wmm-program {
+  --wmm-fg: #1f2328;
+  --wmm-bg: #fff;
+  --wmm-border: #d0d7de;
+  --wmm-accent: #1f6feb;
+  --wmm-call: #ddf4ff;
+  --wmm-control: #fff8c5;
+  --wmm-data: #dafbe1;
+  --wmm-user: #fbefff;
+  color: var(--wmm-fg);
+}
+@media (prefers-color-scheme: dark) {
+  .wmm-program {
+    --wmm-fg: #e6edf3;
+    --wmm-bg: #0d1117;
+    --wmm-border: #30363d;
+    --wmm-accent: #4493f8;
+    --wmm-call: #0c2d6b;
+    --wmm-control: #4b3a00;
+    --wmm-data: #0f3d1e;
+    --wmm-user: #3c1e70;
+  }
+}
+.wmm-blocks { list-style: none; margin: 6px 0 0; padding: 0; }
+.wmm-blocks .wmm-blocks { margin: 6px 0 2px 10px; padding-left: 8px; border-left: 2px solid var(--wmm-border); }
+.wmm-blocks > li + li { margin-top: 4px; }
+.wmm-block { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--wmm-border); line-height: 1.9; overflow-wrap: anywhere; }
+.wmm-block--call { background: var(--wmm-call); }
+.wmm-block--control { background: var(--wmm-control); }
+.wmm-block--data { background: var(--wmm-data); }
+.wmm-block--user { background: var(--wmm-user); }
+.wmm-verb { font-weight: 600; }
+.wmm-pill { display: inline-block; padding: 0 6px; border-radius: 10px; border: 1px solid var(--wmm-border); background: var(--wmm-bg); line-height: 1.5; }
+.wmm-pill--input { border-color: var(--wmm-accent); }
+.wmm-tool { font: 600 12px ui-monospace, monospace; }
+.wmm-arg + .wmm-arg::before,
+.wmm-item + .wmm-item::before { content: ", "; }
