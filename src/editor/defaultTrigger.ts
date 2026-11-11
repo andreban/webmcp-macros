@@ -11,7 +11,8 @@ import type { Expr, Macro, MacroTrigger, Stmt } from "../macro/types";
  * and loops count, since they may run before that point. Tools on other sites
  * are left out because the matcher only checks the trigger site. A program
  * that calls no tool there gets one empty set: offered on the site alone.
- * A procedure call counts the procedure's body where the call is made.
+ * A procedure call counts the procedure's body where the call is made. An
+ * `onSite` for another site ends the walk like a `waitForTool`.
  */
 export function defaultTrigger(macro: Macro): MacroTrigger {
   const site = Object.hasOwn(macro.sites, macro.trigger.site)
@@ -41,6 +42,10 @@ function collectStmt(stmt: Stmt, walk: Walk): boolean {
   switch (stmt.op) {
     case "waitForTool":
       return false;
+    // The trigger covers the first steps on its own site; once the program
+    // moves to another site, later steps are not needed up front.
+    case "onSite":
+      return stmt.site === walk.macro.trigger.site && collectBody(stmt.body, walk);
     case "call":
       if (!collectRecord(stmt.args, walk)) return false;
       walk.called.add(stmt.tool);

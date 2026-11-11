@@ -255,8 +255,8 @@ describe("mazeMacro", () => {
     const maze = fakeMaze(oneKeyOneDoor);
     const host: ToolHost = {
       ...maze.host,
-      callTool: (name, args) =>
-        name === "pickup" ? Promise.resolve({ success: false, reason: "Your hands are full." }) : maze.host.callTool(name, args),
+      callTool: (name, args, site) =>
+        name === "pickup" ? Promise.resolve({ success: false, reason: "Your hands are full." }) : maze.host.callTool(name, args, site),
     };
     expect(await runMacro(mazeMacro, host)).toMatchObject({ status: "failed", message: "Your hands are full." });
   });

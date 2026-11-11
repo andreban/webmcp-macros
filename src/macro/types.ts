@@ -31,6 +31,8 @@ export interface MacroTool {
   name: string;
   /** Hash of the tool's inputSchema when the macro was authored. */
   schemaHash?: string;
+  /** The tool's inputSchema as the editor last saw it, so the macro can be edited away from the page. */
+  inputSchema?: JsonSchema;
 }
 
 export interface MacroTrigger {
@@ -111,7 +113,13 @@ export type Stmt =
   /** Removes the last item, as from a stack; saves it in `saveAs` when given. */
   | { op: "popBack"; var: string; saveAs?: string }
   /** Ends the current procedure call with `value`, or null. */
-  | { op: "return"; value?: Expr };
+  | { op: "return"; value?: Expr }
+  /**
+   * Runs `body` against the tab of `site`, a key into `Macro.sites`; nested
+   * statements, procedures called from it included, use that site until the
+   * body ends. Outside any `onSite`, steps run on the trigger site.
+   */
+  | { op: "onSite"; site: string; body: Stmt[] };
 
 /**
  * A procedure sees only its parameters and the variables it sets, never the

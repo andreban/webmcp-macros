@@ -1,8 +1,8 @@
-import { type Dispatch, Fragment, useId, useRef, useState } from "react";
-import type { BinaryOp, Expr, Macro } from "../macro/types";
+import { type Dispatch, Fragment, type ReactNode, useId, useRef, useState } from "react";
+import type { BinaryOp, Expr, Macro, Stmt } from "../macro/types";
 import { ExprPicker, formatLiteral, type LiteralType, parseLiteral, variableNames } from "./ExprPicker";
 import { type Slot as SlotDef, type SlotValue, type SlotValues, expressions, exprKind, readSlot } from "./registry";
-import type { EditorAction, Path } from "./state";
+import { type EditorAction, isOptionalSlot, type Path } from "./state";
 
 export interface SlotProps {
   macro: Macro;
@@ -143,6 +143,8 @@ function Field({ macro, path, slot, dispatch, type, update }: FieldProps) {
       return <Choose label="input" value={slot.value} options={(macro.inputs ?? []).map((input) => [input.key, input.label])} onChange={update} />;
     case "tool":
       return <Choose label="tool" value={slot.value} options={Object.entries(macro.tools).map(([alias, tool]) => [alias, tool.name])} onChange={update} />;
+    case "site":
+      return <Choose label="site" value={slot.value} options={Object.keys(macro.sites).map((key) => [key, key])} onChange={update} />;
     case "binOp":
       return <Choose label="operator" value={slot.value} options={Object.keys(BIN_OPS).map((op) => [op, op])} onChange={(op) => isBinOp(op) && update(op)} />;
     case "args": {
@@ -185,12 +187,91 @@ function Field({ macro, path, slot, dispatch, type, update }: FieldProps) {
           </button>
         </>
       );
-    case "body":
     case "ms":
-      return null; // statement-only slot types
+      return (
+        <>
+          <DraftField
+            label="milliseconds"
+            value={String(slot.value)}
+            commit={(text) => {
+              const ms = Number(text.trim());
+              if (text.trim() === "" || !Number.isInteger(ms) || ms < 0) return "Enter a whole number of milliseconds.";
+              update(ms);
+            }}
+          />{" "}
+          ms
+        </>
+      );
+    case "body":
+      return null; // the program editor renders bodies as blocks
     default:
       throw new Error(`Unknown slot: ${JSON.stringify(slot satisfies never)}`);
   }
+}
+
+// Readable names for statement fields whose key is not a word on its own.
+const FIELD_LABELS: Readonly<Record<string, string>> = { cond: "condition", saveAs: "result name", timeoutMs: "time limit" };
+
+// What an optional field starts as when added; value slots are filled through their picker instead.
+const NEW_FIELD: { readonly [T in SlotDef["type"]]?: SlotValues[T] } = { var: "result", ms: 5000, body: [], args: {} };
+
+export interface StmtSlotProps {
+  macro: Macro;
+  /** The statement's path; the slot lives at `[...at, part.slot]`. */
+  at: Path;
+  stmt: Stmt;
+  part: SlotDef;
+  dispatch: Dispatch<EditorAction>;
+  /** Bodies are blocks, which only the program editor knows how to render. */
+  renderBody: (body: Stmt[], at: Path) => ReactNode;
+}
+
+/**
+ * One slot of a statement block, editable in place. An optional field that is
+ * absent shows as a button that adds it, and a present one can be removed.
+ */
+export function StmtSlot({ macro, at, stmt, part, dispatch, renderBody }: StmtSlotProps) {
+  const path = [...at, part.slot];
+  const label = FIELD_LABELS[part.slot] ?? part.slot;
+  const optional = isOptionalSlot(stmt.op, part.slot);
+  // `call` without `args` means no arguments, so it edits as an empty record.
+  const slot = readSlot(stmt, part) ?? (part.type === "args" ? { type: "args", value: {} } : undefined);
+  // As in `ExprEditor`: `SlotOf` ties the slot type to the field's value type.
+  const update = (value: SlotValues[SlotDef["type"]]) =>
+    dispatch({ type: "replaceNode", at, node: { ...stmt, [part.slot]: value } as Stmt });
+  if (part.type === "value") {
+    const expr = slot?.type === "value" ? slot.value : undefined;
+    return (
+      <>
+        {expr && part.prefix}
+        <Slot macro={macro} path={path} expr={expr} dispatch={dispatch} label={label} optional={optional} />
+      </>
+    );
+  }
+  if (slot === undefined) {
+    const value = NEW_FIELD[part.type];
+    return value === undefined ? null : (
+      <button type="button" className="wmm-slot-button" onClick={() => update(value)}>
+        + {label}
+      </button>
+    );
+  }
+  const prefix = part.prefix && (slot.type === "body" ? <span className="wmm-verb">{part.prefix}</span> : part.prefix);
+  return (
+    <>
+      {prefix}
+      {slot.type === "body" ? (
+        renderBody(slot.value, path)
+      ) : (
+        <Field macro={macro} path={path} slot={slot} dispatch={dispatch} type="any" update={update} />
+      )}
+      {optional && part.type !== "args" ? (
+        <button type="button" className="wmm-slot-button" aria-label={`Remove ${label}`} onClick={() => dispatch({ type: "clearSlot", at: path })}>
+          ×
+        </button>
+      ) : null}
+    </>
+  );
 }
 
 /** A select over `[value, text]` options; a value not among them shows as unchosen. */
