@@ -119,6 +119,26 @@ function Block({ macro, stmt }: { macro: Macro; stmt: Stmt }) {
           <Value macro={macro} expr={stmt.message} />
         </Shell>
       );
+    case "setKey":
+      return (
+        <Shell category="data" verb="set key">
+          <Value macro={macro} expr={stmt.key} /> of <Var name={stmt.var} /> to <Value macro={macro} expr={stmt.value} />
+        </Shell>
+      );
+    case "push":
+      return (
+        <Shell category="data" verb="add">
+          <Value macro={macro} expr={stmt.value} /> to the end of <Var name={stmt.var} />
+        </Shell>
+      );
+    case "popFront":
+    case "popBack":
+      return (
+        <Shell category="data" verb={stmt.op === "popFront" ? "take first of" : "take last of"}>
+          <Var name={stmt.var} />
+          {stmt.saveAs ? <> as <Var name={stmt.saveAs} /></> : null}
+        </Shell>
+      );
     default:
       throw new Error(`Unknown statement: ${JSON.stringify(stmt satisfies never)}`);
   }
@@ -189,6 +209,29 @@ function Value({ macro, expr }: { macro: Macro; expr: Expr }) {
       </Pill>
     );
   }
+  if ("getKey" in expr) {
+    return (
+      <Pill>
+        <Value macro={macro} expr={expr.key} /> of <Value macro={macro} expr={expr.getKey} />
+      </Pill>
+    );
+  }
+  if ("hasKey" in expr) {
+    return (
+      <Pill>
+        <Value macro={macro} expr={expr.hasKey} /> has <Value macro={macro} expr={expr.key} />?
+      </Pill>
+    );
+  }
+  if ("length" in expr) return <Pill>length of <Value macro={macro} expr={expr.length} /></Pill>;
+  if ("contains" in expr) {
+    return (
+      <Pill>
+        <Value macro={macro} expr={expr.contains} /> contains <Value macro={macro} expr={expr.item} />?
+      </Pill>
+    );
+  }
+  if ("keys" in expr) return <Pill>keys of <Value macro={macro} expr={expr.keys} /></Pill>;
   throw new Error(`Unknown expression: ${JSON.stringify(expr satisfies never)}`);
 }
 

@@ -108,6 +108,18 @@ export async function runMacro(macro: Macro, host: ToolHost, options: RunOptions
     return Object.fromEntries(entries);
   };
 
+  const readVar = (name: string): Json => {
+    const value = vars.get(name);
+    if (value === undefined) throw new MacroRunError(`Variable "${name}" is not set.`);
+    return value;
+  };
+
+  const readList = (op: string, name: string): Json[] => {
+    const value = readVar(name);
+    if (!Array.isArray(value)) throw new MacroRunError(`${op} needs a list in "${name}", got ${kind(value)}.`);
+    return value;
+  };
+
   const evaluate = async (expr: Expr): Promise<Json> => {
     if ("lit" in expr) return expr.lit;
     if ("input" in expr) {
@@ -115,11 +127,7 @@ export async function runMacro(macro: Macro, host: ToolHost, options: RunOptions
       if (value === undefined) throw new MacroRunError(`Missing input "${expr.input}".`);
       return value;
     }
-    if ("var" in expr) {
-      const value = vars.get(expr.var);
-      if (value === undefined) throw new MacroRunError(`Variable "${expr.var}" is not set.`);
-      return value;
-    }
+    if ("var" in expr) return readVar(expr.var);
     if ("get" in expr) {
       let value: Json | undefined = await evaluate(expr.get);
       for (const key of expr.path) {
@@ -138,6 +146,27 @@ export async function runMacro(macro: Macro, host: ToolHost, options: RunOptions
     }
     if ("toolAvailable" in expr) return host.isToolAvailable(toolName(expr.toolAvailable));
     if ("call" in expr) return call(expr.call, expr.args);
+    if ("getKey" in expr) return lookup("getKey", await evaluate(expr.getKey), await evaluate(expr.key)) ?? null;
+    if ("hasKey" in expr) return lookup("hasKey", await evaluate(expr.hasKey), await evaluate(expr.key)) !== undefined;
+    if ("length" in expr) {
+      const value = await evaluate(expr.length);
+      if (Array.isArray(value) || typeof value === "string") return value.length;
+      if (isDict(value)) return Object.keys(value).length;
+      throw new MacroRunError(`length needs a list, a string or a dictionary, got ${kind(value)}.`);
+    }
+    if ("contains" in expr) {
+      const haystack = await evaluate(expr.contains);
+      const item = await evaluate(expr.item);
+      if (Array.isArray(haystack)) return haystack.some((entry) => binary("==", entry, item));
+      if (typeof haystack === "string" && typeof item === "string") return haystack.includes(item);
+      if (typeof haystack === "string") throw new MacroRunError(`contains on a string needs a string, got ${kind(item)}.`);
+      throw new MacroRunError(`contains needs a list or a string, got ${kind(haystack)}.`);
+    }
+    if ("keys" in expr) {
+      const value = await evaluate(expr.keys);
+      if (isDict(value)) return Object.keys(value);
+      throw new MacroRunError(`keys needs a dictionary, got ${kind(value)}.`);
+    }
     if ("bin" in expr) {
       const left = await evaluate(expr.left);
       // Short-circuit so `and`/`or` can guard a tool call on the right.
@@ -201,6 +230,34 @@ export async function runMacro(macro: Macro, host: ToolHost, options: RunOptions
           throw new StopSignal(stmt.message ? text(await evaluate(stmt.message)) : undefined);
         case "fail":
           throw new MacroRunError(text(await evaluate(stmt.message)));
+        // The data statements store a new value instead of changing the old
+        // one in place: the old one may be a literal in the macro's program,
+        // which must read the same on the next run, or be held by another
+        // variable too.
+        case "setKey": {
+          const key = await evaluate(stmt.key);
+          const value = await evaluate(stmt.value);
+          const dict = readVar(stmt.var);
+          if (!isDict(dict)) throw new MacroRunError(`setKey needs a dictionary in "${stmt.var}", got ${kind(dict)}.`);
+          if (typeof key !== "string") throw new MacroRunError(`setKey needs a string key, got ${kind(key)}.`);
+          // fromEntries defines own properties, so a "__proto__" key stays a key.
+          vars.set(stmt.var, Object.fromEntries([...Object.entries(dict), [key, value]]));
+          break;
+        }
+        case "push": {
+          const value = await evaluate(stmt.value);
+          vars.set(stmt.var, [...readList("push", stmt.var), value]);
+          break;
+        }
+        case "popFront":
+        case "popBack": {
+          const list = readList(stmt.op, stmt.var);
+          const item = stmt.op === "popFront" ? list[0] : list[list.length - 1];
+          if (item === undefined) throw new MacroRunError(`${stmt.op} needs a non-empty list; "${stmt.var}" is empty.`);
+          vars.set(stmt.var, stmt.op === "popFront" ? list.slice(1) : list.slice(0, -1));
+          if (stmt.saveAs) vars.set(stmt.saveAs, item);
+          break;
+        }
         default:
           throw new MacroRunError(`Unknown statement: ${JSON.stringify(stmt satisfies never)}`);
       }
@@ -241,6 +298,38 @@ function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
 /** Reads only own properties, so keys such as "constructor" are not inherited values. */
 function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
   return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+type Dict = { [key: string]: Json };
+
+function isDict(value: Json): value is Dict {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Names a value's type for error messages, in the words the editor uses. */
+function kind(value: Json): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "a list";
+  return isDict(value) ? "a dictionary" : `a ${typeof value}`;
+}
+
+/**
+ * Reads a dictionary entry by string key or a list item by integer index;
+ * `undefined` when there is none. Keys come from macros and tool results, so
+ * only own properties count.
+ */
+function lookup(op: string, container: Json, key: Json): Json | undefined {
+  if (Array.isArray(container)) {
+    if (typeof key !== "number" || !Number.isInteger(key)) {
+      throw new MacroRunError(`${op} on a list needs an integer index, got ${kind(key)}.`);
+    }
+    return container[key];
+  }
+  if (isDict(container)) {
+    if (typeof key !== "string") throw new MacroRunError(`${op} on a dictionary needs a string key, got ${kind(key)}.`);
+    return ownValue(container, key);
+  }
+  throw new MacroRunError(`${op} needs a dictionary or a list, got ${kind(container)}.`);
 }
 
 function truthy(value: Json): boolean {
