@@ -78,6 +78,7 @@ export type ExprKind =
   | "list"
   | "toolAvailable"
   | "call"
+  | "callProc"
   | "getKey"
   | "hasKey"
   | "length"
@@ -188,6 +189,12 @@ export const statements: { [O in StmtOp]: StmtDef<StmtOf<O>> } = {
     label: [{ slot: "var", type: "var" }, { slot: "saveAs", type: "var", prefix: " as " }],
     create: () => ({ op: "popBack", var: "" }),
   },
+  return: {
+    category: "control",
+    verb: "return",
+    label: [{ slot: "value", type: "value" }],
+    create: () => ({ op: "return" }),
+  },
 };
 
 export const expressions: { [K in ExprKind]: ExprDef<ExprOf<K>> } = {
@@ -212,6 +219,11 @@ export const expressions: { [K in ExprKind]: ExprDef<ExprOf<K>> } = {
   call: {
     label: ["result of ", { slot: "call", type: "tool" }, " ", { slot: "args", type: "args" }],
     create: () => ({ call: "", args: {} }),
+  },
+  // The procedure name shows as a name pill until procedures get a slot type of their own.
+  callProc: {
+    label: ["result of procedure ", { slot: "callProc", type: "var" }, " ", { slot: "args", type: "args" }],
+    create: () => ({ callProc: "", args: {} }),
   },
   getKey: {
     label: [{ slot: "key", type: "value" }, " of ", { slot: "getKey", type: "value" }],
