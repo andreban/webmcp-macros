@@ -5,7 +5,9 @@
  */
 import { isExecuteToolResponse, isToolList, type ContentRequest, type RunEvent } from "../messages";
 import type { Json, Macro, ToolInfo } from "../macro/types";
-import { runMacro, type RunResult, type ToolHost } from "../runner/interpreter";
+import { startRun as initialState, step, type RunResult, type ToolHost } from "../runner/interpreter";
+import type { RunState } from "../runner/machine";
+import type { RunStore } from "./runStore";
 
 export interface RunHostDeps {
   /** Sends to the tab's top-frame content script; rejects when no listener answers. */
@@ -13,6 +15,8 @@ export interface RunHostDeps {
   /** Delivers a run event to the tab and to every extension page. */
   broadcast(event: RunEvent): void;
   loadMacros(): Promise<Macro[]>;
+  /** Where runs are saved after each step, so a later worker can resume them. */
+  store?: Pick<RunStore, "save" | "remove">;
   /** How often `waitForTool` re-lists tools, in milliseconds. */
   pollMs?: number;
 }
@@ -22,6 +26,8 @@ export interface RunHost {
   setTools(tabId: number, tools: ToolInfo[]): void;
   /** Runs the macro on the tab. Ignored while that tab already has a run. */
   startRun(tabId: number, macroId: string, inputs: Record<string, Json>): Promise<void>;
+  /** Continues a run saved by an earlier worker. Ignored while that tab already has a run. */
+  resumeRun(tabId: number, state: RunState): Promise<void>;
   stopRun(tabId: number): void;
   /** Aborts the tab's run and forgets its tools. */
   removeTab(tabId: number): void;
@@ -99,31 +105,61 @@ export function createRunHost(deps: RunHostDeps): RunHost {
     },
   });
 
-  const startRun = async (tabId: number, macroId: string, inputs: Record<string, Json>): Promise<void> => {
+  /**
+   * Claims the tab, then steps the run to its end, saving it after each step.
+   * Before each tool call the saved run gains an in-flight marker, so a worker
+   * that resumes it knows the step may already have had effects.
+   */
+  const drive = async (tabId: number, macroId: string, load: () => Promise<RunState | undefined>): Promise<void> => {
     if (activeRuns.has(tabId)) return;
     // Claim the tab before the first await so a second request cannot slip in.
     const controller = new AbortController();
     activeRuns.set(tabId, controller);
     const finished = (result: RunResult) => deps.broadcast({ type: "run-finished", tabId, macroId, result });
     try {
-      const macro = (await deps.loadMacros()).find((candidate) => candidate.id === macroId);
-      if (!macro) return finished({ status: "failed", message: "Macro not found.", toolCalls: 0, vars: {} });
-      const host = toolHost(tabId, controller.signal);
-      host.onStep = ({ count, tool }) => deps.broadcast({ type: "run-step", tabId, macroId, count, tool });
-      host.message = (text) => deps.broadcast({ type: "run-message", tabId, macroId, text });
-      finished(await runMacro(macro, host, { inputs, signal: controller.signal }));
+      const loaded = await load();
+      if (!loaded) return finished({ status: "failed", message: "Macro not found.", toolCalls: 0, vars: {} });
+      let state = loaded;
+      let inFlight: string[] = [];
+      const tabHost = toolHost(tabId, controller.signal);
+      const host: ToolHost = {
+        ...tabHost,
+        async callTool(name, args) {
+          inFlight = [...inFlight, name];
+          // `state` is still the one before this step: a resume repeats the step.
+          await deps.store?.save(tabId, state, inFlight);
+          return tabHost.callTool(name, args);
+        },
+        onStep: ({ count, tool }) => deps.broadcast({ type: "run-step", tabId, macroId, count, tool }),
+        message: (text) => deps.broadcast({ type: "run-message", tabId, macroId, text }),
+      };
+      while (state.status === "running") {
+        inFlight = [];
+        state = await step(state, host, controller.signal);
+        if (state.status === "running") await deps.store?.save(tabId, state);
+      }
+      const { status, message, toolCalls, vars } = state;
+      finished({ status, message, toolCalls, vars });
     } catch (error: unknown) {
-      // runMacro never throws; this is storage failing. Report it so the
+      // step never throws; this is storage failing. Report it so the
       // surfaces that started the run do not wait forever.
       finished({ status: "failed", message: error instanceof Error ? error.message : String(error), toolCalls: 0, vars: {} });
     } finally {
       activeRuns.delete(tabId);
+      await deps.store?.remove(tabId).catch(() => {});
     }
   };
+
+  const startRun = (tabId: number, macroId: string, inputs: Record<string, Json>): Promise<void> =>
+    drive(tabId, macroId, async () => {
+      const macro = (await deps.loadMacros()).find((candidate) => candidate.id === macroId);
+      return macro && initialState(macro, { inputs });
+    });
 
   return {
     setTools,
     startRun,
+    resumeRun: (tabId, state) => drive(tabId, state.macro.id, async () => state),
     stopRun(tabId) {
       activeRuns.get(tabId)?.abort();
       // Also cancel a tool call in flight, which the signal cannot reach.

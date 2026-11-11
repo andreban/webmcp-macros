@@ -3,9 +3,11 @@
  * a run survives the navigations its own tool calls cause. This file only
  * wires `chrome.*` events to the run host in `runHost.ts`.
  */
-import { isBackgroundRequest, type ContentRequest, type RunEvent } from "../messages";
+import { isBackgroundRequest, isToolList, type ContentRequest, type RunEvent } from "../messages";
+import type { ToolInfo } from "../macro/types";
 import { loadMacros, seedSamples } from "../storage";
 import { createRunHost } from "./runHost";
+import { createRunStore, resumeState } from "./runStore";
 
 const sendToTab = (tabId: number, request: ContentRequest): Promise<unknown> =>
   chrome.tabs.sendMessage(tabId, request, { frameId: 0 });
@@ -16,7 +18,34 @@ const broadcast = (event: RunEvent): void => {
   chrome.tabs.sendMessage(event.tabId, event, { frameId: 0 }).catch(() => {});
 };
 
-const runHost = createRunHost({ sendToTab, broadcast, loadMacros });
+const runStore = createRunStore(chrome.storage.session);
+const runHost = createRunHost({ sendToTab, broadcast, loadMacros, store: runStore });
+
+/**
+ * Picks up the runs a stopped worker left behind. Each tab's tools are read
+ * again first: the cache died with the old worker, and the listing's
+ * annotations decide whether an interrupted step may be repeated.
+ */
+async function resumeRuns(): Promise<void> {
+  for (const saved of await runStore.loadAll()) {
+    const tabOpen = await chrome.tabs.get(saved.tabId).then(() => true, () => false);
+    if (!tabOpen) {
+      await runStore.remove(saved.tabId);
+      continue;
+    }
+    let tools: ToolInfo[] = [];
+    try {
+      const listed = await sendToTab(saved.tabId, { type: "list-tools" });
+      if (isToolList(listed)) tools = listed;
+    } catch {
+      // The page is still loading; the run waits for its tools as usual.
+    }
+    runHost.setTools(saved.tabId, tools);
+    void runHost.resumeRun(saved.tabId, resumeState(saved, tools));
+  }
+}
+
+void resumeRuns().catch(() => {});
 
 chrome.runtime.onInstalled.addListener(() => void seedSamples().catch(() => {}));
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
@@ -44,4 +73,8 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
   return false;
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => runHost.removeTab(tabId));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  runHost.removeTab(tabId);
+  // A run this worker has not resumed yet has no controller to abort.
+  runStore.remove(tabId).catch(() => {});
+});
