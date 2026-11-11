@@ -30,7 +30,7 @@ const slotNames = (label: readonly (string | Slot)[]) =>
 
 describe("createDefault", () => {
   it("creates a node of the requested op for every statement", () => {
-    expect(ops).toHaveLength(16);
+    expect(ops).toHaveLength(17);
     for (const op of ops) expect(createDefault(op).op).toBe(op);
   });
 

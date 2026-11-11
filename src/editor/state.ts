@@ -73,6 +73,7 @@ const STMT_SLOTS: { readonly [K in Stmt["op"]]: Slots } = {
   popFront: {},
   popBack: {},
   return: { value: "expr" },
+  onSite: { body: "body" },
 };
 
 function exprSlots(expr: Expr): Slots {
