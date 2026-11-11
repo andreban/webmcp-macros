@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Json, ToolInfo } from "../macro/types";
-import type { BackgroundRequest } from "../messages";
 import { ToolNotFoundError } from "../webmcp/adapter";
-import { type ToolAccess, createRequestHandler, isContentRequest, reportTools } from "./bridge";
+import { type ToolAccess, createRequestHandler, isContentRequest } from "./bridge";
 
 const tools: ToolInfo[] = [{ name: "search", description: "Find flights" }];
 
@@ -101,19 +100,5 @@ describe("createRequestHandler", () => {
     handle({ type: "abort-tool" });
     await handle({ type: "execute-tool", name: "b", args: {} });
     expect(signals.map((signal) => signal.aborted)).toEqual([false, false]);
-  });
-});
-
-describe("reportTools", () => {
-  it("sends tools-changed with the current tools and no matches", async () => {
-    const sent: BackgroundRequest[] = [];
-    await reportTools(async () => tools, async (request) => sent.push(request));
-    expect(sent).toEqual([{ type: "tools-changed", tools, matches: 0 }]);
-  });
-
-  it("reports [] when listing fails and swallows a send with no receiver", async () => {
-    const send = vi.fn((_request: BackgroundRequest) => Promise.reject(new Error("No receiving end")));
-    await expect(reportTools(() => Promise.reject(new Error("gone")), send)).resolves.toBeUndefined();
-    expect(send).toHaveBeenCalledWith({ type: "tools-changed", tools: [], matches: 0 });
   });
 });
