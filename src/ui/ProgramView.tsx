@@ -67,7 +67,8 @@ function Parts({ macro, node, label }: { macro: Macro; node: Stmt | Expr; label:
   });
 }
 
-function SlotView({ macro, slot }: { macro: Macro; slot: SlotValue }) {
+/** One slot's value, read-only. */
+export function SlotView({ macro, slot }: { macro: Macro; slot: SlotValue }) {
   switch (slot.type) {
     case "value":
       return <Value macro={macro} expr={slot.value} />;

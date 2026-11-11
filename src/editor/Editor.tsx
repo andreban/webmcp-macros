@@ -1,10 +1,10 @@
 import { type Dispatch, type KeyboardEvent as ReactKeyboardEvent, useEffect, useReducer, useState } from "react";
 import type { Macro } from "../macro/types";
 import { loadMacros, saveMacro } from "../storage";
-import { ProgramView } from "../ui/ProgramView";
 import { InputsPanel } from "./InputsPanel";
-import { SitesPanel } from "./SitesPanel";
 import { createNewMacro, type EditorParams, editorPath, historyShortcut, isDirty } from "./page";
+import { ProgramEditor } from "./ProgramEditor";
+import { SitesPanel } from "./SitesPanel";
 import { createEditorState, type EditorAction, editorReducer, type EditorState } from "./state";
 
 type Loaded =
@@ -165,8 +165,7 @@ export function EditorView({ state, dispatch, status, canSave, onSave, tabId }: 
       <SitesPanel macro={macro} dispatch={dispatch} tabId={tabId} />
       <section aria-labelledby="program-heading">
         <h2 id="program-heading">Program</h2>
-        {/* Read-only until statement editing (#31) replaces it with editable blocks. */}
-        <ProgramView macro={macro} />
+        <ProgramEditor macro={macro} dispatch={dispatch} />
       </section>
     </main>
   );
