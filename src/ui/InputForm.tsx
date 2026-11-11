@@ -1,6 +1,8 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
 import type { Json, JsonSchema, Macro, MacroInput } from "../macro/types";
+import { applyPreset } from "../presets";
 import { loadRememberedInputs } from "../storage";
+import { PresetPicker } from "./PresetPicker";
 
 /** How an input is edited. Derived from the schema, which the macro's author controls. */
 export type FieldSpec =
@@ -85,6 +87,27 @@ export function coerceValues(inputs: MacroInput[], values: Record<string, FormVa
   return { ok: true, values: typed };
 }
 
+/** The fields that are valid on their own, typed, for saving as a preset. Empty or invalid fields are left out. */
+export function presetValues(inputs: MacroInput[], values: Record<string, FormValue>): Record<string, Json> {
+  return Object.fromEntries(
+    inputs.flatMap((input) => {
+      const result = coerceValues([input], values);
+      return result.ok ? Object.entries(result.values) : [];
+    }),
+  );
+}
+
+/** `current` with the preset's still-applicable values filled in; fields the preset does not hold keep their value. */
+export function fillFromPreset(
+  inputs: MacroInput[],
+  current: Record<string, FormValue>,
+  stored: Record<string, Json>,
+): Record<string, FormValue> {
+  const applied = applyPreset(inputs, stored);
+  const filled = inputs.filter((input) => Object.hasOwn(applied, input.key));
+  return { ...current, ...Object.fromEntries(filled.map((input) => [input.key, toFormValue(fieldFor(input.schema), applied[input.key])])) };
+}
+
 interface Props {
   macro: Macro;
   submitLabel: string;
@@ -119,7 +142,7 @@ export function InputForm(props: Props) {
   return <InputFormView key={macroId} {...props} remembered={loaded.remembered} />;
 }
 
-/** The form itself, with remembered values passed in. Field values are set once, at mount. */
+/** The form itself, with remembered values passed in. Field values are set at mount, then only by the user or a chosen preset. */
 export function InputFormView({ macro, remembered, submitLabel, onSubmit, onCancel }: Props & { remembered: Record<string, Json> }) {
   const inputs = macro.inputs ?? [];
   const id = useId();
@@ -135,6 +158,13 @@ export function InputFormView({ macro, remembered, submitLabel, onSubmit, onCanc
 
   return (
     <form className="wmm-form" onSubmit={submit}>
+      {inputs.length > 0 ? (
+        <PresetPicker
+          macroId={macro.id}
+          currentValues={() => presetValues(inputs, values)}
+          onChoose={(stored) => setValues((current) => fillFromPreset(inputs, current, stored))}
+        />
+      ) : null}
       {inputs.map((input, index) => (
         <div key={input.key} className="wmm-field">
           <label htmlFor={`${id}-${index}`}>{input.label}</label>
