@@ -24,3 +24,7 @@
 .run-log code { overflow-wrap: anywhere; }
 /* An outline as well as the colour, so the highlight does not rely on colour alone. */
 .wmm-block--running { outline: 2px solid var(--wmm-accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--wmm-accent) 25%, transparent); }
+.wmm-program [draggable="true"] { cursor: grab; }
+.wmm-program [data-drop="before"] { box-shadow: 0 -3px 0 var(--wmm-accent); }
+.wmm-program [data-drop="after"] { box-shadow: 0 3px 0 var(--wmm-accent); }
+.wmm-program [data-drop="into"] { outline: 2px dashed var(--wmm-accent); }

@@ -7,12 +7,17 @@
 import type { BinaryOp, Expr, Json, Macro, Stmt } from "../macro/types";
 import { callBase, locate, statementPath, type Frame, type Loop, type NodePath, type RunState } from "./machine";
 
+/**
+ * Every method takes the key into `Macro.sites` whose tab the step runs on:
+ * the innermost `onSite`, or the trigger site outside any. The host decides
+ * which tab that is.
+ */
 export interface ToolHost {
   /** Calls a tool by its page name. `null` means the call started a navigation. */
-  callTool(name: string, args: Record<string, Json>): Promise<Json>;
-  isToolAvailable(name: string): Promise<boolean>;
+  callTool(name: string, args: Record<string, Json>, site: string): Promise<Json>;
+  isToolAvailable(name: string, site: string): Promise<boolean>;
   /** Resolves once the tool is registered; rejects on timeout. */
-  waitForTool(name: string, timeoutMs: number): Promise<void>;
+  waitForTool(name: string, timeoutMs: number, site: string): Promise<void>;
   message?(text: string): void;
   onStep?(step: StepInfo): void;
 }
@@ -132,9 +137,13 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
     if (++steps > maxSteps) throw new MacroRunError(`Step limit of ${maxSteps} reached.`);
   };
 
+  // Procedures run on their caller's site: the innermost `onSite` on the
+  // whole stack counts, not only those of the current procedure.
+  const site = (): string => frames.findLast((frame) => frame.site !== undefined)?.site ?? macro.trigger.site;
+
   const waitFor = async (name: string, timeoutMs: number): Promise<void> => {
     try {
-      await host.waitForTool(name, timeoutMs);
+      await host.waitForTool(name, timeoutMs, site());
     } catch (error: unknown) {
       // A host that knows why the tool is missing says so with a MacroRunError.
       if (error instanceof MacroRunError) throw error;
@@ -142,9 +151,14 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
     }
   };
 
+  // A tool is registered by one site's pages, so calling it from another
+  // site's tab could only time out; say what is wrong instead.
   const toolName = (alias: string): string => {
     const tool = ownValue(macro.tools, alias);
     if (!tool) throw new MacroRunError(`Unknown tool alias "${alias}".`);
+    if (tool.site !== site()) {
+      throw new MacroRunError(`Tool "${tool.name}" belongs to site "${tool.site}"; put it in an "on site" block for that site.`);
+    }
     return tool.name;
   };
 
@@ -159,7 +173,7 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
       await waitFor(name, toolTimeoutMs);
       toolCalls++;
       host.onStep?.({ count: toolCalls, tool: name, args, path: statementPath(macro, state.frames) });
-      return host.callTool(name, args);
+      return host.callTool(name, args, site());
     });
 
   const callProc = (procName: string, argExprs: Record<string, Expr> = {}): Promise<Json> =>
@@ -219,7 +233,7 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
       return out;
     }
     // Kept like call results, so a replayed statement takes the same branches.
-    if ("toolAvailable" in expr) return once(() => host.isToolAvailable(toolName(expr.toolAvailable)));
+    if ("toolAvailable" in expr) return once(() => host.isToolAvailable(toolName(expr.toolAvailable), site()));
     if ("call" in expr) return call(expr.call, expr.args);
     if ("callProc" in expr) return callProc(expr.callProc, expr.args);
     if ("getKey" in expr) return lookup("getKey", await evaluate(expr.getKey), await evaluate(expr.key)) ?? null;
@@ -321,6 +335,12 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
       case "waitForTool":
         await waitFor(toolName(stmt.tool), stmt.timeoutMs ?? toolTimeoutMs);
         break;
+      case "onSite":
+        // Only declared sites: their `startUrl` is the only place a run may open.
+        if (!Object.hasOwn(macro.sites, stmt.site)) throw new MacroRunError(`Unknown site "${stmt.site}".`);
+        // Leaving the body pops this frame, which restores the previous site.
+        frames.push({ branch: "body", pc: 0, site: stmt.site });
+        return;
       case "wait":
         await sleep(stmt.ms, signal);
         break;
