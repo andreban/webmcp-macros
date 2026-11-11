@@ -9,8 +9,8 @@ import { loadMacros, seedSamples } from "../storage";
 import { createRunHost } from "./runHost";
 import { createRunStore, resumeState } from "./runStore";
 
-const sendToTab = (tabId: number, request: ContentRequest): Promise<unknown> =>
-  chrome.tabs.sendMessage(tabId, request, { frameId: 0 });
+const sendToTab = (tabId: number, request: ContentRequest, frameId = 0): Promise<unknown> =>
+  chrome.tabs.sendMessage(tabId, request, { frameId });
 
 const broadcast = (event: RunEvent): void => {
   // Either side may have no listener (no extension page open, tab gone).
@@ -33,6 +33,7 @@ async function resumeRuns(): Promise<void> {
       await runStore.remove(saved.tabId);
       continue;
     }
+    // Iframes' tools come back with their next report or the run's first poll.
     let tools: ToolInfo[] = [];
     try {
       const listed = await sendToTab(saved.tabId, { type: "list-tools" });
@@ -56,11 +57,16 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
   const tabId = ("tabId" in message ? message.tabId : undefined) ?? sender.tab?.id;
   if (tabId === undefined) return false;
   switch (message.type) {
-    case "tools-changed":
-      runHost.setTools(tabId, message.tools);
-      // The badge counts macros offered on this page, as the launcher does.
-      chrome.action.setBadgeText({ tabId, text: message.matches ? String(message.matches) : "" }).catch(() => {});
+    case "tools-changed": {
+      // Chrome sets the frame and origin; the page cannot forge them.
+      const frameId = sender.frameId ?? 0;
+      runHost.setTools(tabId, message.tools, frameId, sender.origin);
+      // The badge counts macros offered on this page, as the launcher in the top frame does.
+      if (frameId === 0) {
+        chrome.action.setBadgeText({ tabId, text: message.matches ? String(message.matches) : "" }).catch(() => {});
+      }
       break;
+    }
     case "run-macro":
       void runHost.startRun(tabId, message.macroId, message.inputs);
       break;

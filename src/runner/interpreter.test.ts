@@ -847,3 +847,37 @@ describe("procedures", () => {
     expect(fake.calls).toHaveLength(2);
   });
 });
+
+describe("frameOrigin", () => {
+  it("passes the tool's frameOrigin to every host method", async () => {
+    const seen: (string | undefined)[] = [];
+    const host: ToolHost = {
+      async callTool(_name, _args, frameOrigin) {
+        seen.push(`call ${frameOrigin}`);
+        return null;
+      },
+      async isToolAvailable(_name, frameOrigin) {
+        seen.push(`available ${frameOrigin}`);
+        return true;
+      },
+      async waitForTool(_name, _timeoutMs, frameOrigin) {
+        seen.push(`wait ${frameOrigin}`);
+      },
+    };
+    const tools = { inner: { site: "s", name: "save", frameOrigin: "https://widget.example" } };
+    const result = await runMacro(
+      macro(
+        [
+          { op: "set", var: "here", value: { toolAvailable: "inner" } },
+          { op: "waitForTool", tool: "inner" },
+          { op: "call", tool: "inner" },
+        ],
+        tools,
+      ),
+      host,
+    );
+    expect(result.status).toBe("done");
+    const origin = "https://widget.example";
+    expect(seen).toEqual([`available ${origin}`, `wait ${origin}`, `wait ${origin}`, `call ${origin}`]);
+  });
+});

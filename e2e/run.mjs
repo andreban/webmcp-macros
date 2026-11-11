@@ -18,9 +18,10 @@ const extension = resolve(here, "../dist");
 const RUN_TIMEOUT_MS = 30_000;
 
 // WebMCP needs a secure context, and http://localhost is one.
-// `/navigate` (with any query) serves the navigation fixture; every other path the rocket.
+// `/navigate` and `/frames` (with any query) serve their fixtures; every other path the rocket.
+const fixtures = { "/navigate": "navigate.html", "/frames": "frames.html" };
 const server = createServer(async (request, response) => {
-  const fixture = new URL(request.url, "http://localhost").pathname === "/navigate" ? "navigate.html" : "rocket.html";
+  const fixture = fixtures[new URL(request.url, "http://localhost").pathname] ?? "rocket.html";
   response.setHeader("content-type", "text/html");
   response.end(await readFile(join(here, "fixtures", fixture)));
 });
@@ -99,6 +100,7 @@ try {
   check("rocket is launched", (await status()) === "LAUNCHED", await status());
 
   await navigationScenario(context, worker, panel);
+  await framesScenario(context, worker, panel);
 } catch (error) {
   check("e2e script ran to the end", false, error instanceof Error ? error.message : String(error));
 } finally {
@@ -133,6 +135,14 @@ function runMacro(panel, tabId, macroId, inputs) {
   );
 }
 
+/** Appends macros to the saved ones, as an import would. */
+function saveMacros(panel, added) {
+  return panel.evaluate(async (added) => {
+    const { macros = [] } = await chrome.storage.local.get("macros");
+    await chrome.storage.local.set({ macros: [...macros, ...added] });
+  }, added);
+}
+
 /** A macro over the navigation fixture's tools, which all live on one site. */
 function navigationMacro(id, program) {
   const names = ["open_page_b", "leave_for_blank", "open_view_c", "finish"];
@@ -162,10 +172,7 @@ async function navigationScenario(context, worker, panel) {
     { op: "call", tool: "leave_for_blank" },
     { op: "waitForTool", tool: "finish", timeoutMs: 3000 },
   ]);
-  await panel.evaluate(async (added) => {
-    const { macros = [] } = await chrome.storage.local.get("macros");
-    await chrome.storage.local.set({ macros: [...macros, ...added] });
-  }, [journey, stranded]);
+  await saveMacros(panel, [journey, stranded]);
 
   const page = await context.newPage();
   await page.goto(`${pageUrl}navigate`);
@@ -196,4 +203,50 @@ async function navigationScenario(context, worker, panel) {
     JSON.stringify({ status: left.status, message: left.message, elapsed }),
   );
   check("the tab is on the blank page", page.url() === "about:blank", page.url());
+}
+
+/**
+ * Tools registered inside a cross-origin iframe are listed and callable, and
+ * `frameOrigin` picks the iframe's tool when the top page has one of the same name.
+ */
+async function framesScenario(context, worker, panel) {
+  const port = new URL(pageUrl).port;
+  const innerOrigin = `http://127.0.0.1:${port}`;
+  const macro = {
+    wmm: 1,
+    id: "e2e-frames",
+    name: "e2e-frames",
+    sites: { fixture: { match: ["http://localhost/*"] } },
+    tools: {
+      stamp: { site: "fixture", name: "stamp_inner" },
+      top: { site: "fixture", name: "whoami" },
+      inner: { site: "fixture", name: "whoami", frameOrigin: innerOrigin },
+    },
+    trigger: { site: "fixture", anyOf: [] },
+    program: [
+      { op: "waitForTool", tool: "stamp" },
+      { op: "set", var: "listed", value: { toolAvailable: "stamp" } },
+      { op: "call", tool: "stamp", saveAs: "stamped" },
+      { op: "call", tool: "top", saveAs: "top" },
+      { op: "call", tool: "inner", saveAs: "inner" },
+    ],
+  };
+  await saveMacros(panel, [macro]);
+
+  const page = await context.newPage();
+  await page.goto(`${pageUrl}frames`);
+  const tabId = await worker.evaluate(async (url) => (await chrome.tabs.query({ url }))[0]?.id, `${pageUrl}frames`);
+  const result = await runMacro(panel, tabId, macro.id, {});
+  check(
+    "a tool inside an iframe is listed and callable",
+    result.status === "done" && result.vars?.listed === true && result.vars?.stamped?.stamped === true,
+    JSON.stringify({ status: result.status, message: result.message, vars: result.vars }),
+  );
+  check(
+    "a shared name runs in the top frame, or in the iframe that frameOrigin names",
+    result.vars?.top?.frame === "top" && result.vars?.inner?.frame === "inner" && result.vars?.inner?.origin === innerOrigin,
+    JSON.stringify({ top: result.vars?.top, inner: result.vars?.inner }),
+  );
+  const stamped = await page.frameLocator("iframe").locator("#stamped").textContent();
+  check("the iframe's page changed", stamped === "yes", stamped);
 }

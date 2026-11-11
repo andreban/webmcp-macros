@@ -4,15 +4,18 @@
  * It is a step machine over the macro JSON: `step` runs one statement of a
  * `RunState` and returns the next state, and `runMacro` loops over it.
  */
-import type { BinaryOp, Expr, Json, Macro, Stmt } from "../macro/types";
+import type { BinaryOp, Expr, Json, Macro, MacroTool, Stmt } from "../macro/types";
 import { callBase, locate, type Frame, type Loop, type RunState } from "./machine";
 
 export interface ToolHost {
-  /** Calls a tool by its page name. `null` means the call started a navigation. */
-  callTool(name: string, args: Record<string, Json>): Promise<Json>;
-  isToolAvailable(name: string): Promise<boolean>;
+  /**
+   * Calls a tool by its page name. `null` means the call started a navigation.
+   * `frameOrigin` (from `MacroTool`) picks the frame when several register the name.
+   */
+  callTool(name: string, args: Record<string, Json>, frameOrigin?: string): Promise<Json>;
+  isToolAvailable(name: string, frameOrigin?: string): Promise<boolean>;
   /** Resolves once the tool is registered; rejects on timeout. */
-  waitForTool(name: string, timeoutMs: number): Promise<void>;
+  waitForTool(name: string, timeoutMs: number, frameOrigin?: string): Promise<void>;
   message?(text: string): void;
   onStep?(step: StepInfo): void;
 }
@@ -130,9 +133,9 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
     if (++steps > maxSteps) throw new MacroRunError(`Step limit of ${maxSteps} reached.`);
   };
 
-  const waitFor = async (name: string, timeoutMs: number): Promise<void> => {
+  const waitFor = async ({ name, frameOrigin }: MacroTool, timeoutMs: number): Promise<void> => {
     try {
-      await host.waitForTool(name, timeoutMs);
+      await host.waitForTool(name, timeoutMs, frameOrigin);
     } catch (error: unknown) {
       // A host that knows why the tool is missing says so with a MacroRunError.
       if (error instanceof MacroRunError) throw error;
@@ -140,24 +143,24 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
     }
   };
 
-  const toolName = (alias: string): string => {
+  const toolRef = (alias: string): MacroTool => {
     const tool = ownValue(macro.tools, alias);
     if (!tool) throw new MacroRunError(`Unknown tool alias "${alias}".`);
-    return tool.name;
+    return tool;
   };
 
   // Tools register and unregister as the page changes state, so every call
   // waits for its tool instead of assuming an earlier listing still holds.
   const call = (alias: string, argExprs: Record<string, Expr> = {}): Promise<Json> =>
     once(async () => {
-      const name = toolName(alias);
+      const tool = toolRef(alias);
       const args = await evaluateRecord(argExprs);
       // Counted after the arguments, which may enter a procedure and replay this call.
       tick();
-      await waitFor(name, toolTimeoutMs);
+      await waitFor(tool, toolTimeoutMs);
       toolCalls++;
-      host.onStep?.({ count: toolCalls, tool: name, args });
-      return host.callTool(name, args);
+      host.onStep?.({ count: toolCalls, tool: tool.name, args });
+      return host.callTool(tool.name, args, tool.frameOrigin);
     });
 
   const callProc = (procName: string, argExprs: Record<string, Expr> = {}): Promise<Json> =>
@@ -217,7 +220,10 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
       return out;
     }
     // Kept like call results, so a replayed statement takes the same branches.
-    if ("toolAvailable" in expr) return once(() => host.isToolAvailable(toolName(expr.toolAvailable)));
+    if ("toolAvailable" in expr) return once(() => {
+        const { name, frameOrigin } = toolRef(expr.toolAvailable);
+        return host.isToolAvailable(name, frameOrigin);
+      });
     if ("call" in expr) return call(expr.call, expr.args);
     if ("callProc" in expr) return callProc(expr.callProc, expr.args);
     if ("getKey" in expr) return lookup("getKey", await evaluate(expr.getKey), await evaluate(expr.key)) ?? null;
@@ -317,7 +323,7 @@ export async function step(state: RunState, host: ToolHost, signal?: AbortSignal
         break;
       }
       case "waitForTool":
-        await waitFor(toolName(stmt.tool), stmt.timeoutMs ?? toolTimeoutMs);
+        await waitFor(toolRef(stmt.tool), stmt.timeoutMs ?? toolTimeoutMs);
         break;
       case "wait":
         await sleep(stmt.ms, signal);

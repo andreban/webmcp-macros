@@ -31,6 +31,11 @@ export interface MacroTool {
   name: string;
   /** Hash of the tool's inputSchema when the macro was authored. */
   schemaHash?: string;
+  /**
+   * Origin of the frame (top page or iframe) that registers the tool, for
+   * when frames register equal names. Without it, the top frame wins.
+   */
+  frameOrigin?: string;
 }
 
 export interface MacroTrigger {
