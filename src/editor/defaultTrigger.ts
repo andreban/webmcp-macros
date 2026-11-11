@@ -11,52 +11,61 @@ import type { Expr, Macro, MacroTrigger, Stmt } from "../macro/types";
  * and loops count, since they may run before that point. Tools on other sites
  * are left out because the matcher only checks the trigger site. A program
  * that calls no tool there gets one empty set: offered on the site alone.
+ * A procedure call counts the procedure's body where the call is made.
  */
 export function defaultTrigger(macro: Macro): MacroTrigger {
   const site = Object.hasOwn(macro.sites, macro.trigger.site)
     ? macro.trigger.site
     : (Object.keys(macro.sites)[0] ?? macro.trigger.site);
-  const called = new Set<string>();
-  collectBody(macro.program, called);
-  const aliases = [...called].filter(
+  const walk: Walk = { macro, called: new Set(), entered: new Set() };
+  collectBody(macro.program, walk);
+  const aliases = [...walk.called].filter(
     (alias) => Object.hasOwn(macro.tools, alias) && macro.tools[alias]?.site === site,
   );
   return { site, anyOf: [aliases] };
 }
 
-// Each collector returns false once it reaches a `waitForTool`, which stops the walk.
-function collectBody(body: readonly Stmt[], called: Set<string>): boolean {
-  return body.every((stmt) => collectStmt(stmt, called));
+interface Walk {
+  macro: Macro;
+  called: Set<string>;
+  /** Procedures already walked: a body adds the same calls each time, and recursion must end. */
+  entered: Set<string>;
 }
 
-function collectStmt(stmt: Stmt, called: Set<string>): boolean {
+// Each collector returns false once it reaches a `waitForTool`, which stops the walk.
+function collectBody(body: readonly Stmt[], walk: Walk): boolean {
+  return body.every((stmt) => collectStmt(stmt, walk));
+}
+
+function collectStmt(stmt: Stmt, walk: Walk): boolean {
   switch (stmt.op) {
     case "waitForTool":
       return false;
     case "call":
-      collectRecord(stmt.args, called);
-      called.add(stmt.tool);
+      if (!collectRecord(stmt.args, walk)) return false;
+      walk.called.add(stmt.tool);
       return true;
     case "set":
-      return collectExpr(stmt.value, called);
-    case "if":
-      return collectExpr(stmt.cond, called) && collectBody(stmt.then, called) && collectBody(stmt.else ?? [], called);
-    case "repeat":
-      return collectExpr(stmt.times, called) && collectBody(stmt.body, called);
-    case "while":
-      return collectExpr(stmt.cond, called) && collectBody(stmt.body, called);
-    case "forEach":
-      return collectExpr(stmt.list, called) && collectBody(stmt.body, called);
-    case "message":
-      return collectExpr(stmt.text, called);
-    case "stop":
-      return stmt.message === undefined || collectExpr(stmt.message, called);
-    case "fail":
-      return collectExpr(stmt.message, called);
-    case "setKey":
-      return collectExpr(stmt.key, called) && collectExpr(stmt.value, called);
     case "push":
-      return collectExpr(stmt.value, called);
+      return collectExpr(stmt.value, walk);
+    case "if":
+      return collectExpr(stmt.cond, walk) && collectBody(stmt.then, walk) && collectBody(stmt.else ?? [], walk);
+    case "repeat":
+      return collectExpr(stmt.times, walk) && collectBody(stmt.body, walk);
+    case "while":
+      return collectExpr(stmt.cond, walk) && collectBody(stmt.body, walk);
+    case "forEach":
+      return collectExpr(stmt.list, walk) && collectBody(stmt.body, walk);
+    case "message":
+      return collectExpr(stmt.text, walk);
+    case "stop":
+      return stmt.message === undefined || collectExpr(stmt.message, walk);
+    case "return":
+      return stmt.value === undefined || collectExpr(stmt.value, walk);
+    case "fail":
+      return collectExpr(stmt.message, walk);
+    case "setKey":
+      return collectExpr(stmt.key, walk) && collectExpr(stmt.value, walk);
     case "wait":
     case "popFront":
     case "popBack":
@@ -66,25 +75,33 @@ function collectStmt(stmt: Stmt, called: Set<string>): boolean {
   }
 }
 
-// Expressions never wait, so these always return true; they only gather `call`s.
-function collectRecord(record: Readonly<Record<string, Expr>> | undefined, called: Set<string>): true {
-  for (const expr of Object.values(record ?? {})) collectExpr(expr, called);
-  return true;
+function collectRecord(record: Readonly<Record<string, Expr>> | undefined, walk: Walk): boolean {
+  return Object.values(record ?? {}).every((expr) => collectExpr(expr, walk));
 }
 
-function collectExpr(expr: Expr, called: Set<string>): true {
+// Only a procedure call can reach a `waitForTool` from inside an expression.
+function collectExpr(expr: Expr, walk: Walk): boolean {
   if ("call" in expr) {
-    collectRecord(expr.args, called);
-    called.add(expr.call);
-  } else if ("get" in expr) collectExpr(expr.get, called);
-  else if ("bin" in expr) collectRecord({ left: expr.left, right: expr.right }, called);
-  else if ("not" in expr) collectExpr(expr.not, called);
-  else if ("obj" in expr) collectRecord(expr.obj, called);
-  else if ("list" in expr) for (const item of expr.list) collectExpr(item, called);
-  else if ("getKey" in expr) collectRecord({ of: expr.getKey, key: expr.key }, called);
-  else if ("hasKey" in expr) collectRecord({ of: expr.hasKey, key: expr.key }, called);
-  else if ("length" in expr) collectExpr(expr.length, called);
-  else if ("contains" in expr) collectRecord({ of: expr.contains, item: expr.item }, called);
-  else if ("keys" in expr) collectExpr(expr.keys, called);
+    if (!collectRecord(expr.args, walk)) return false;
+    walk.called.add(expr.call);
+    return true;
+  }
+  if ("callProc" in expr) {
+    if (!collectRecord(expr.args, walk)) return false;
+    const procedure = walk.macro.procedures?.[expr.callProc];
+    if (!procedure || walk.entered.has(expr.callProc)) return true;
+    walk.entered.add(expr.callProc);
+    return collectBody(procedure.body, walk);
+  }
+  if ("get" in expr) return collectExpr(expr.get, walk);
+  if ("bin" in expr) return collectExpr(expr.left, walk) && collectExpr(expr.right, walk);
+  if ("not" in expr) return collectExpr(expr.not, walk);
+  if ("obj" in expr) return collectRecord(expr.obj, walk);
+  if ("list" in expr) return expr.list.every((item) => collectExpr(item, walk));
+  if ("getKey" in expr) return collectExpr(expr.getKey, walk) && collectExpr(expr.key, walk);
+  if ("hasKey" in expr) return collectExpr(expr.hasKey, walk) && collectExpr(expr.key, walk);
+  if ("length" in expr) return collectExpr(expr.length, walk);
+  if ("contains" in expr) return collectExpr(expr.contains, walk) && collectExpr(expr.item, walk);
+  if ("keys" in expr) return collectExpr(expr.keys, walk);
   return true;
 }

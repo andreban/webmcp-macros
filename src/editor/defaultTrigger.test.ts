@@ -44,6 +44,22 @@ describe("defaultTrigger", () => {
     expect(defaultTrigger(macro)).toEqual({ site: "a", anyOf: [["one", "two", "later"]] });
   });
 
+  it("walks into called procedures once, stopping at a waitForTool inside one", () => {
+    const macro: Macro = {
+      ...twoSites,
+      procedures: {
+        loop: { params: [], body: [{ op: "call", tool: "two" }, { op: "return", value: { callProc: "loop" } }] },
+        gate: { params: [], body: [{ op: "waitForTool", tool: "later" }] },
+      },
+      program: [
+        { op: "message", text: { callProc: "loop" } },
+        { op: "call", tool: "one", args: { x: { callProc: "gate" } } },
+        { op: "call", tool: "later" },
+      ],
+    };
+    expect(defaultTrigger(macro)).toEqual({ site: "a", anyOf: [["two"]] });
+  });
+
   it("stops at a waitForTool nested in a branch and skips tools of other sites", () => {
     const macro: Macro = {
       ...twoSites,
