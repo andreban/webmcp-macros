@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Rocket fixture</title>
+  </head>
+  <body>
+    <!--
+      A minimal stand-in for the WebMCP Rocket Launcher demo in dynamic mode:
+      each tool is registered only in the state where it is valid.
+    -->
+    <p>Status: <output id="status">IDLE</output></p>
+    <p>Authorization code: <output id="code">4821</output></p>
+    <script>
+      let status = "IDLE";
+      let controller;
+      const AUTH_CODE = "4821";
+
+      const transition = (next) => {
+        status = next;
+        document.getElementById("status").textContent = status;
+        // Re-register after the tool call returns, as a framework re-render would.
+        setTimeout(sync, 50);
+        return { status };
+      };
+
+      const register = (tool) => document.modelContext.registerTool(tool, { signal: controller.signal });
+
+      const trajectory = { type: "string", enum: ["Moon", "Mars", "ISS", "Jupiter"] };
+
+      function sync() {
+        controller?.abort();
+        controller = new AbortController();
+        register({
+          name: "get_page_state",
+          description: "Returns the current status.",
+          annotations: { readOnlyHint: true },
+          execute: () => ({ status, fuel: 0 }),
+        });
+        register({
+          name: "calculate_fuel",
+          description: "Returns fuel for a destination.",
+          inputSchema: { type: "object", properties: { trajectory }, required: ["trajectory"] },
+          annotations: { readOnlyHint: true },
+          execute: ({ trajectory }) => ({ trajectory, amount: 120, oxidizerRatio: 2.5 }),
+        });
+        register({ name: "reset_system", description: "Resets.", execute: () => transition("IDLE") });
+        if (status === "IDLE") {
+          register({ name: "run_diagnostics", description: "Step 1.", execute: () => transition("DIAGNOSTICS") });
+        }
+        if (status === "DIAGNOSTICS") {
+          register({
+            name: "load_fuel",
+            description: "Step 2.",
+            inputSchema: {
+              type: "object",
+              properties: { amount: { type: "number" }, oxidizer_ratio: { type: "number" } },
+              required: ["amount", "oxidizer_ratio"],
+            },
+            execute: ({ amount, oxidizer_ratio }) =>
+              amount === 120 && oxidizer_ratio === 2.5
+                ? transition("FUELED")
+                : { error: "Wrong fuel load.", code: "INVALID_INPUT" },
+          });
+        }
+        if (status === "FUELED") {
+          register({
+            name: "prepare_launch",
+            description: "Step 3.",
+            inputSchema: {
+              type: "object",
+              properties: { auth_code: { type: "string" }, trajectory },
+              required: ["auth_code", "trajectory"],
+            },
+            execute: ({ auth_code }) =>
+              auth_code === AUTH_CODE
+                ? transition("PREPARED")
+                : { error: "Invalid authorization code.", code: "INVALID_AUTH_CODE" },
+          });
+        }
+        if (status === "PREPARED") {
+          register({ name: "ignite_engines", description: "Step 4.", execute: () => transition("LAUNCHED") });
+        }
+      }
+
+      if (document.modelContext) sync();
+      else document.getElementById("status").textContent = "NO_WEBMCP";
+    </script>
+  </body>
+</html>
