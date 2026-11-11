@@ -97,6 +97,8 @@ export function SlotView({ macro, slot }: { macro: Macro; slot: SlotValue }) {
       return slot.value.join(".");
     case "literal":
       return <span className="wmm-pill wmm-pill--lit">{JSON.stringify(slot.value)}</span>;
+    case "site":
+      return <code className="wmm-site">{slot.value}</code>;
     case "binOp":
       return slot.value;
     default:

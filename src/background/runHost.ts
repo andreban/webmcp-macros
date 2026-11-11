@@ -31,7 +31,14 @@ export interface RunHost {
   stopRun(tabId: number): void;
   /** Aborts the tab's run and forgets its tools. */
   removeTab(tabId: number): void;
-  toolHost(tabId: number, signal: AbortSignal): ToolHost;
+  toolHost(tabId: number, signal: AbortSignal): TabTools;
+}
+
+/** The tool methods of a `ToolHost`, bound to one tab, so without a site. */
+export interface TabTools {
+  callTool(name: string, args: Record<string, Json>): Promise<Json>;
+  isToolAvailable(name: string): Promise<boolean>;
+  waitForTool(name: string, timeoutMs: number): Promise<void>;
 }
 
 const DEFAULT_POLL_MS = 500;
@@ -103,7 +110,7 @@ export function createRunHost(deps: RunHostDeps): RunHost {
       void refreshTools(tabId).then(check);
     });
 
-  const toolHost = (tabId: number, signal: AbortSignal): ToolHost => ({
+  const toolHost = (tabId: number, signal: AbortSignal): TabTools => ({
     async isToolAvailable(name) {
       if (awaitingReport.has(tabId)) {
         await until(tabId, () => !awaitingReport.has(tabId), DEFAULT_REPORT_TIMEOUT_MS, signal);

@@ -143,6 +143,8 @@ function Field({ macro, path, slot, dispatch, type, update }: FieldProps) {
       return <Choose label="input" value={slot.value} options={(macro.inputs ?? []).map((input) => [input.key, input.label])} onChange={update} />;
     case "tool":
       return <Choose label="tool" value={slot.value} options={Object.entries(macro.tools).map(([alias, tool]) => [alias, tool.name])} onChange={update} />;
+    case "site":
+      return <Choose label="site" value={slot.value} options={Object.keys(macro.sites).map((key) => [key, key])} onChange={update} />;
     case "binOp":
       return <Choose label="operator" value={slot.value} options={Object.keys(BIN_OPS).map((op) => [op, op])} onChange={(op) => isBinOp(op) && update(op)} />;
     case "args": {
