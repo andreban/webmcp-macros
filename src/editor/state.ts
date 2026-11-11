@@ -23,6 +23,8 @@ export type EditorAction =
   /** `to` is a position in the macro as it is before the move. */
   | { type: "moveStmt"; from: Path; to: Path }
   | { type: "replaceNode"; at: Path; node: Stmt | Expr }
+  /** Removes an optional field of a statement, such as `else` or a `stop` message. */
+  | { type: "clearSlot"; at: Path }
   | { type: "setMeta"; meta: Partial<MacroMeta> }
   | { type: "addInput"; input: MacroInput }
   /** Replaces the input at `index`; a new key is renamed in every `{input}` reference. */
@@ -189,6 +191,26 @@ function replaceNode(macro: Macro, at: Path, node: Stmt | Expr): Macro | undefin
   return fits ? writeMacro(macro, at, node) : undefined;
 }
 
+type OptionalKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? K : never }[keyof T];
+
+// Checked against the format: listing a required field fails the build.
+const OPTIONAL: { readonly [O in Stmt["op"]]?: readonly OptionalKeys<Extract<Stmt, { op: O }>>[] } = {
+  call: ["args", "saveAs"],
+  if: ["else"],
+  waitForTool: ["timeoutMs"],
+  stop: ["message"],
+};
+
+function clearSlot(macro: Macro, at: Path): Macro | undefined {
+  const field = at.at(-1);
+  const parent = getNode(macro, at.slice(0, -1));
+  if (parent?.kind !== "stmt" || !parent.node || typeof field !== "string") return undefined;
+  const optional: readonly string[] = OPTIONAL[parent.node.op] ?? [];
+  if (!optional.includes(field) || !Object.hasOwn(parent.node, field)) return undefined;
+  const rest = Object.fromEntries(Object.entries(parent.node).filter(([key]) => key !== field));
+  return writeMacro(macro, at.slice(0, -1), rest);
+}
+
 function setMeta(macro: Macro, meta: Partial<MacroMeta>): Macro | undefined {
   const same = Object.entries(meta).every(([key, value]) => Object.is(value, Reflect.get(macro, key)));
   return same ? undefined : { ...macro, ...meta };
@@ -299,6 +321,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return commit(state, moveStmt(macro, action.from, action.to));
     case "replaceNode":
       return commit(state, replaceNode(macro, action.at, action.node));
+    case "clearSlot":
+      return commit(state, clearSlot(macro, action.at));
     case "setMeta":
       return commit(state, setMeta(macro, action.meta));
     case "addInput":

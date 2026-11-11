@@ -171,6 +171,17 @@ describe("editorReducer", () => {
     expect(before).toEqual(snapshot);
   });
 
+  it("clears an optional field and records one undo step", () => {
+    const start = createEditorState(sample());
+    const withMessage = run(start, { type: "insertStmt", at: ["program", 0], stmt: { op: "stop", message: { lit: "bye" } } });
+    const cleared = run(withMessage, { type: "clearSlot", at: ["program", 0, "message"] });
+    expect(cleared.macro.program[0]).toEqual({ op: "stop" });
+    expect(cleared.past).toHaveLength(2);
+    const noArgs = run(start, { type: "clearSlot", at: ["program", 3, "args"] });
+    expect(noArgs.macro.program[3]).toEqual({ op: "call", tool: "look" });
+    expect(run(noArgs, { type: "undo" }).macro).toBe(start.macro);
+  });
+
   it("updates metadata and ignores a patch that changes nothing", () => {
     const start = createEditorState(sample());
     const renamed = run(start, { type: "setMeta", meta: { name: "New", description: "Does things" } });
@@ -194,6 +205,12 @@ describe("editorReducer", () => {
     { type: "replaceNode", at: ["program", 1], node: { lit: 1 } },
     { type: "replaceNode", at: ["program", 4], node: msg("x") },
     { type: "replaceNode", at: ["program", 0, "cond"], node: { lit: 1 } },
+    { type: "clearSlot", at: ["program", 1, "cond"] },
+    { type: "clearSlot", at: ["program", 1, "else"] },
+    { type: "clearSlot", at: ["program", 1, "cond", "left"] },
+    { type: "clearSlot", at: ["program", 3, "tool"] },
+    { type: "clearSlot", at: ["program", 9, "else"] },
+    { type: "clearSlot", at: ["program"] },
     { type: "undo" },
     { type: "redo" },
   ])("returns the same state for %j", (action) => {
