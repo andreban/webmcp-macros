@@ -18,9 +18,10 @@ const extension = resolve(here, "../dist");
 const RUN_TIMEOUT_MS = 30_000;
 
 // WebMCP needs a secure context, and http://localhost is one.
-// `/navigate` (with any query) serves the navigation fixture; every other path the rocket.
+// `/navigate` and `/flights` (with any query) serve their fixtures; every other path the rocket.
+const routes = { "/navigate": "navigate.html", "/flights": "flights.html" };
 const server = createServer(async (request, response) => {
-  const fixture = new URL(request.url, "http://localhost").pathname === "/navigate" ? "navigate.html" : "rocket.html";
+  const fixture = routes[new URL(request.url, "http://localhost").pathname] ?? "rocket.html";
   response.setHeader("content-type", "text/html");
   response.end(await readFile(join(here, "fixtures", fixture)));
 });
@@ -99,6 +100,7 @@ try {
   check("rocket is launched", (await status()) === "LAUNCHED", await status());
 
   await navigationScenario(context, worker, panel);
+  await flightScenario(context, extensionId);
 } catch (error) {
   check("e2e script ran to the end", false, error instanceof Error ? error.message : String(error));
 } finally {
@@ -196,4 +198,111 @@ async function navigationScenario(context, worker, panel) {
     JSON.stringify({ status: left.status, message: left.message, elapsed }),
   );
   check("the tab is on the blank page", page.url() === "about:blank", page.url());
+}
+
+/**
+ * The flight sample (spec §12, macro 2), started from the side panel's form
+ * as a user would, against a fixture with the demo's tools: the search view
+ * registers only `searchFlights`, and the filter tools arrive after the
+ * route change the search causes. The bundled sample only matches the live
+ * demo, so the stored copy gets a localhost pattern added.
+ */
+async function flightScenario(context, extensionId) {
+  const macroId = "sample-flight-search";
+  const panelUrl = `chrome-extension://${extensionId}/src/sidepanel/index.html`;
+  const panel = await context.newPage();
+  await panel.goto(panelUrl);
+  await panel.evaluate(async (macroId) => {
+    const { macros = [] } = await chrome.storage.local.get("macros");
+    const withFixture = (macro) => ({
+      ...macro,
+      sites: { ...macro.sites, flights: { ...macro.sites.flights, match: [...macro.sites.flights.match, "http://localhost:*/flights*"] } },
+    });
+    await chrome.storage.local.set({ macros: macros.map((macro) => (macro.id === macroId ? withFixture(macro) : macro)) });
+    await chrome.storage.local.remove(`inputs:${macroId}`);
+  }, macroId);
+
+  const page = await context.newPage();
+  await page.goto(`${pageUrl}flights`);
+  const text = (selector) => page.textContent(selector);
+  check("flight fixture starts on the search view", (await text("#view")) === "SEARCH", await text("#view"));
+  // The side panel follows the active tab of its window.
+  await page.bringToFront();
+
+  const openForm = async () => {
+    await panel.locator("li.card", { hasText: "Search my usual flight" }).getByRole("button", { name: "Run" }).click();
+    return panel.locator("form.wmm-form");
+  };
+  const form = await openForm();
+  await form.getByLabel("From (IATA)").fill("SFO");
+  await form.getByLabel("To (IATA)").fill("JFK");
+  await form.getByLabel("Passengers").fill("2");
+  await form.getByLabel("Stops").selectOption("Non-stop only");
+  await form.getByLabel("Maximum price").fill("500");
+
+  // The listener is in place before Run is pressed, so the result cannot be missed.
+  await panel.evaluate((timeoutMs) => {
+    window.flightRun = new Promise((done) => {
+      const timer = setTimeout(() => done({ status: "timeout" }), timeoutMs);
+      chrome.runtime.onMessage.addListener((message) => {
+        if (message?.type !== "run-finished") return;
+        clearTimeout(timer);
+        done(message.result);
+      });
+    });
+  }, RUN_TIMEOUT_MS);
+  await form.getByRole("button", { name: "Run" }).click();
+  const result = await panel.evaluate(() => window.flightRun);
+  check(
+    "flight macro waits for the results view's tools and finishes",
+    result.status === "done" && result.toolCalls === 4,
+    JSON.stringify({ status: result.status, message: result.message, toolCalls: result.toolCalls }),
+  );
+  const search = new URLSearchParams((await text("#search")) ?? "");
+  check(
+    "the fixture searched with the form's values",
+    (await text("#view")) === "RESULTS" &&
+      search.get("origin") === "SFO" &&
+      search.get("destination") === "JFK" &&
+      search.get("passengers") === "2" &&
+      search.get("tripType") === "round-trip" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(search.get("outboundDate") ?? ""),
+    await text("#search"),
+  );
+  const filters = JSON.parse((await text("#filters")) ?? "null");
+  check(
+    "the fixture shows the filters applied",
+    filters?.maxPrice === 500 && JSON.stringify(filters?.stops) === "[0]" && (await text("#shown")) === "1",
+    `${await text("#filters")} shows ${await text("#shown")}`,
+  );
+  const runStatus = await panel.getByRole("region", { name: "This page" }).getByRole("status").textContent();
+  check("the run is reported in the side panel", runStatus === "Filters applied to your search.", runStatus);
+
+  const stored = await panel.evaluate(async (key) => (await chrome.storage.local.get(key))[key], `inputs:${macroId}`);
+  check(
+    "remember inputs are stored and ask inputs are not",
+    // chrome.storage does not keep key order.
+    JSON.stringify(Object.entries(stored ?? {}).sort()) ===
+      JSON.stringify(Object.entries({ maxPrice: 500, maxStops: "Non-stop only", origin: "SFO", passengers: 2 })),
+    JSON.stringify(stored),
+  );
+
+  // The next run starts from the search view again; its form shows what was remembered.
+  await page.goto(`${pageUrl}flights`);
+  await page.bringToFront();
+  const next = await openForm();
+  const field = (label) => next.getByLabel(label).inputValue();
+  const shown = {
+    origin: await field("From (IATA)"),
+    destination: await field("To (IATA)"),
+    passengers: await field("Passengers"),
+    maxStops: await field("Stops"),
+    maxPrice: await field("Maximum price"),
+  };
+  check(
+    "the next run's form is pre-filled with the remembered inputs",
+    JSON.stringify(shown) ===
+      JSON.stringify({ origin: "SFO", destination: "NYC", passengers: "2", maxStops: "Non-stop only", maxPrice: "500" }),
+    JSON.stringify(shown),
+  );
 }
