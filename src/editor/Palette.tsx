@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type Ref, useId, useState } from "react";
+import { type HTMLAttributes, type KeyboardEvent, type Ref, useId, useState } from "react";
 import { type StmtOp, statements } from "./registry";
 
 const OPS = Object.keys(statements).filter((op): op is StmtOp => Object.hasOwn(statements, op));
@@ -14,6 +14,8 @@ export interface PaletteProps {
   onPick: (op: StmtOp) => void;
   /** Escape: the caller puts focus back where it was. */
   onCancel: () => void;
+  /** Extra props for each option, such as making it draggable into the program. */
+  itemProps?: (op: StmtOp) => HTMLAttributes<HTMLElement>;
 }
 
 /**
@@ -21,7 +23,7 @@ export interface PaletteProps {
  * control serves both ways in: typing filters, arrows choose, Enter inserts;
  * "/" on a block focuses it as the quick insert.
  */
-export function Palette({ inputRef, onPick, onCancel }: PaletteProps) {
+export function Palette({ inputRef, onPick, onCancel, itemProps }: PaletteProps) {
   const id = useId();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -78,6 +80,7 @@ export function Palette({ inputRef, onPick, onCancel }: PaletteProps) {
             aria-selected={op === activeOp}
             className={`wmm-block wmm-block--${statements[op].category}`}
             onClick={() => pick(op)}
+            {...itemProps?.(op)}
           >
             <span className="wmm-verb">{statements[op].verb}</span>
           </li>
