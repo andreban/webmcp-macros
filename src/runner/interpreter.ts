@@ -78,7 +78,9 @@ export async function runMacro(macro: Macro, host: ToolHost, options: RunOptions
   const waitFor = async (name: string, timeoutMs: number): Promise<void> => {
     try {
       await host.waitForTool(name, timeoutMs);
-    } catch {
+    } catch (error: unknown) {
+      // A host that knows why the tool is missing says so with a MacroRunError.
+      if (error instanceof MacroRunError) throw error;
       throw new MacroRunError(`Tool "${name}" never became available.`);
     }
   };

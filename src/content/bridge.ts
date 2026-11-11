@@ -42,17 +42,22 @@ export type RequestHandler = (
 /**
  * Creates the handler for requests to this tab. Replies never reject: the
  * other side of a message channel cannot tell a thrown error from a closed
- * port, so failures are part of the reply.
+ * port, so failures are part of the reply. `documentLoads` counts the
+ * navigations that started loading another document in this tab; a call
+ * during which it grows is reported as `navigated`.
  */
-export function createRequestHandler(tools: ToolAccess): RequestHandler {
+export function createRequestHandler(tools: ToolAccess, documentLoads: () => number = () => 0): RequestHandler {
   // The runner calls one tool at a time per tab, so one controller suffices.
   let inFlight: AbortController | undefined;
 
   async function execute(name: string, args: Record<string, Json>): Promise<ExecuteToolResponse> {
     const controller = new AbortController();
     inFlight = controller;
+    const loadsBefore = documentLoads();
     try {
-      return { ok: true, result: await tools.executeTool(name, args, controller.signal) };
+      const result = await tools.executeTool(name, args, controller.signal);
+      // This document is about to be replaced; the background then waits for the next one.
+      return documentLoads() > loadsBefore ? { ok: true, result, navigated: true } : { ok: true, result };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       return error instanceof ToolNotFoundError ? { ok: false, error: message, notFound: true } : { ok: false, error: message };

@@ -53,6 +53,22 @@ describe("createRequestHandler", () => {
     expect(executeTool).toHaveBeenCalledWith("search", { to: "LIS" }, expect.any(AbortSignal));
   });
 
+  it("flags a call during which the page started loading another document", async () => {
+    let loads = 4;
+    const executeTool = async (name: string): Promise<Json> => {
+      if (name === "leave") loads++;
+      return null;
+    };
+    const handle = createRequestHandler(fakeAccess({ executeTool }), () => loads);
+    await expect(handle({ type: "execute-tool", name: "leave", args: {} })).resolves.toEqual({
+      ok: true,
+      result: null,
+      navigated: true,
+    });
+    // An earlier load does not mark the next call.
+    await expect(handle({ type: "execute-tool", name: "stay", args: {} })).resolves.toEqual({ ok: true, result: null });
+  });
+
   it("replies with the error instead of rejecting", async () => {
     const handle = createRequestHandler(fakeAccess({ executeTool: () => Promise.reject(new Error("Sold out")) }));
     await expect(handle({ type: "execute-tool", name: "book", args: {} })).resolves.toEqual({

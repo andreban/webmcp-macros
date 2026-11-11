@@ -14,9 +14,12 @@ export type ContentRequest =
 
 /**
  * The content script's reply to `execute-tool`. It never throws across the
- * channel; `notFound` says the tool is not registered on the page right now.
+ * channel; `notFound` says the tool is not registered on the page right now,
+ * and `navigated` that the call started loading another document.
  */
-export type ExecuteToolResponse = { ok: true; result: Json } | { ok: false; error: string; notFound?: boolean };
+export type ExecuteToolResponse =
+  | { ok: true; result: Json; navigated?: boolean }
+  | { ok: false; error: string; notFound?: boolean };
 
 /** Content script or side panel → background. */
 export type BackgroundRequest =
@@ -102,5 +105,7 @@ export function isBackgroundRequest(message: unknown): message is BackgroundRequ
 /** Narrows the content script's reply to `execute-tool`. */
 export function isExecuteToolResponse(value: unknown): value is ExecuteToolResponse {
   if (!isRecord(value)) return false;
-  return value.ok === true ? "result" in value : value.ok === false && typeof value.error === "string";
+  return value.ok === true
+    ? "result" in value && (value.navigated === undefined || typeof value.navigated === "boolean")
+    : value.ok === false && typeof value.error === "string";
 }
