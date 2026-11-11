@@ -77,7 +77,17 @@ export type Expr =
   | { obj: Record<string, Expr> }
   | { list: Expr[] }
   | { toolAvailable: string }
-  | { call: string; args?: Record<string, Expr> };
+  | { call: string; args?: Record<string, Expr> }
+  // Data operations. A key is a string for a dictionary or an integer index
+  // for a list; a missing key reads as null, like `get`.
+  | { getKey: Expr; key: Expr }
+  | { hasKey: Expr; key: Expr }
+  /** Items of a list, characters of a string, or keys of a dictionary. */
+  | { length: Expr }
+  /** A list holds an equal item, or a string holds a substring. */
+  | { contains: Expr; item: Expr }
+  /** A dictionary's keys, as a list of strings. */
+  | { keys: Expr };
 
 export type Stmt =
   | { op: "call"; tool: string; args?: Record<string, Expr>; saveAs?: string }
@@ -90,7 +100,14 @@ export type Stmt =
   | { op: "wait"; ms: number }
   | { op: "message"; text: Expr }
   | { op: "stop"; message?: Expr }
-  | { op: "fail"; message: Expr };
+  | { op: "fail"; message: Expr }
+  // Data operations replace the dictionary or list held in a variable.
+  | { op: "setKey"; var: string; key: Expr; value: Expr }
+  | { op: "push"; var: string; value: Expr }
+  /** Removes the first item, as from a queue; saves it in `saveAs` when given. */
+  | { op: "popFront"; var: string; saveAs?: string }
+  /** Removes the last item, as from a stack; saves it in `saveAs` when given. */
+  | { op: "popBack"; var: string; saveAs?: string };
 
 export interface Macro {
   wmm: typeof MACRO_VERSION;

@@ -522,3 +522,180 @@ describe("expressions", () => {
     expect(o !== null && typeof o === "object" && Object.hasOwn(o, "__proto__")).toBe(true);
   });
 });
+
+describe("data operations", () => {
+  /** Runs the program and returns the failure message. */
+  async function failure(program: Stmt[]): Promise<string | undefined> {
+    const result = await runMacro(macro(program), fakeHost().host);
+    expect(result.status).toBe("failed");
+    return result.message;
+  }
+
+  const dict = lit({ a: 1, b: { c: 2 } });
+
+  it("reads keys and list items, with null when missing", async () => {
+    expect(await evaluate({ getKey: dict, key: { bin: "+", left: lit("b"), right: lit("") } })).toEqual({ c: 2 });
+    expect(await evaluate({ getKey: dict, key: lit("z") })).toBeNull();
+    expect(await evaluate({ getKey: dict, key: lit("constructor") })).toBeNull();
+    expect(await evaluate({ getKey: lit(["x", "y"]), key: lit(1) })).toBe("y");
+    expect(await evaluate({ getKey: lit(["x", "y"]), key: lit(2) })).toBeNull();
+  });
+
+  it("tells whether a key or index exists", async () => {
+    expect(await evaluate({ hasKey: dict, key: lit("a") })).toBe(true);
+    expect(await evaluate({ hasKey: dict, key: lit("toString") })).toBe(false);
+    expect(await evaluate({ hasKey: lit([null]), key: lit(0) })).toBe(true);
+    expect(await evaluate({ hasKey: lit([null]), key: lit(-1) })).toBe(false);
+  });
+
+  it("measures lists, strings and dictionaries", async () => {
+    expect(await evaluate({ length: lit([1, 2, 3]) })).toBe(3);
+    expect(await evaluate({ length: lit("abcd") })).toBe(4);
+    expect(await evaluate({ length: dict })).toBe(2);
+  });
+
+  it("finds equal items in lists and substrings in strings", async () => {
+    expect(await evaluate({ contains: lit([1, { x: [2] }]), item: lit({ x: [2] }) })).toBe(true);
+    expect(await evaluate({ contains: lit([1, 2]), item: lit("1") })).toBe(false);
+    expect(await evaluate({ contains: lit("north,east"), item: lit("east") })).toBe(true);
+  });
+
+  it("lists a dictionary's keys", async () => {
+    expect(await evaluate({ keys: dict })).toEqual(["a", "b"]);
+  });
+
+  it("fails expressions on the wrong type with a clear message", async () => {
+    const set = (value: Expr): Stmt[] => [{ op: "set", var: "x", value }];
+    expect(await failure(set({ getKey: lit(5), key: lit("a") }))).toBe("getKey needs a dictionary or a list, got a number.");
+    expect(await failure(set({ getKey: dict, key: lit(1) }))).toBe("getKey on a dictionary needs a string key, got a number.");
+    expect(await failure(set({ hasKey: lit([]), key: lit("0") }))).toBe("hasKey on a list needs an integer index, got a string.");
+    expect(await failure(set({ hasKey: lit([]), key: lit(0.5) }))).toBe("hasKey on a list needs an integer index, got a number.");
+    expect(await failure(set({ length: lit(null) }))).toBe("length needs a list, a string or a dictionary, got null.");
+    expect(await failure(set({ contains: dict, item: lit("a") }))).toBe("contains needs a list or a string, got a dictionary.");
+    expect(await failure(set({ contains: lit("abc"), item: lit(1) }))).toBe("contains on a string needs a string, got a number.");
+    expect(await failure(set({ keys: lit([1]) }))).toBe("keys needs a dictionary, got a list.");
+  });
+
+  it("sets keys, pushes and pops without changing shared values", async () => {
+    const program: Stmt[] = [
+      { op: "set", var: "d", value: lit({ a: 1 }) },
+      { op: "set", var: "alias", value: v("d") },
+      { op: "setKey", var: "d", key: lit("a"), value: lit(2) },
+      { op: "setKey", var: "d", key: lit("__proto__"), value: lit(3) },
+      { op: "set", var: "q", value: lit([1, 2, 3]) },
+      { op: "set", var: "qAlias", value: v("q") },
+      { op: "push", var: "q", value: lit(4) },
+      { op: "popFront", var: "q", saveAs: "first" },
+      { op: "popBack", var: "q", saveAs: "last" },
+      { op: "popBack", var: "q" },
+    ];
+    const run = () => runMacro(macro(program), fakeHost().host);
+    const result = await run();
+    expect(result).toMatchObject({ status: "done", vars: { alias: { a: 1 }, q: [2], qAlias: [1, 2, 3], first: 1, last: 4 } });
+    const d = result.vars.d;
+    expect(d !== null && typeof d === "object" && !Array.isArray(d) && Object.hasOwn(d, "__proto__")).toBe(true);
+    expect(JSON.stringify(d)).toBe('{"a":2,"__proto__":3}');
+    // The literals in the program are untouched, so a second run starts the same.
+    expect((await run()).vars).toEqual(result.vars);
+  });
+
+  it("fails data statements on the wrong type, an unset variable or an empty list", async () => {
+    const withVar = (value: Json, stmt: Stmt): Stmt[] => [{ op: "set", var: "x", value: lit(value) }, stmt];
+    expect(await failure(withVar([], { op: "setKey", var: "x", key: lit("a"), value: lit(1) }))).toBe(
+      'setKey needs a dictionary in "x", got a list.',
+    );
+    expect(await failure(withVar({}, { op: "setKey", var: "x", key: lit(1), value: lit(1) }))).toBe(
+      "setKey needs a string key, got a number.",
+    );
+    expect(await failure(withVar({}, { op: "push", var: "x", value: lit(1) }))).toBe('push needs a list in "x", got a dictionary.');
+    expect(await failure(withVar("ab", { op: "popFront", var: "x" }))).toBe('popFront needs a list in "x", got a string.');
+    expect(await failure(withVar([], { op: "popBack", var: "x" }))).toBe('popBack needs a non-empty list; "x" is empty.');
+    expect(await failure([{ op: "push", var: "nope", value: lit(1) }])).toBe('Variable "nope" is not set.');
+  });
+
+  // A small maze as the maze macro would record it: each cell maps to the
+  // cells reachable from it. Dead end at 2,0; exit at 2,2.
+  const grid = lit({
+    "0,0": ["1,0"],
+    "1,0": ["0,0", "2,0", "1,1"],
+    "2,0": ["1,0"],
+    "1,1": ["1,0", "1,2"],
+    "1,2": ["1,1", "2,2"],
+    "2,2": ["1,2"],
+  });
+
+  it("expresses a breadth-first search for the shortest path", async () => {
+    const program: Stmt[] = [
+      { op: "set", var: "grid", value: grid },
+      { op: "set", var: "prev", value: lit({ "0,0": null }) },
+      { op: "set", var: "queue", value: lit(["0,0"]) },
+      {
+        op: "while",
+        cond: { bin: ">", left: { length: v("queue") }, right: lit(0) },
+        body: [
+          { op: "popFront", var: "queue", saveAs: "cell" },
+          {
+            op: "forEach",
+            list: { getKey: v("grid"), key: v("cell") },
+            var: "next",
+            body: [
+              {
+                op: "if",
+                cond: { not: { hasKey: v("prev"), key: v("next") } },
+                then: [
+                  { op: "setKey", var: "prev", key: v("next"), value: v("cell") },
+                  { op: "push", var: "queue", value: v("next") },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      // Walk back from the exit to build the path.
+      { op: "set", var: "path", value: lit([]) },
+      { op: "set", var: "at", value: lit("2,2") },
+      {
+        op: "while",
+        cond: { bin: "!=", left: v("at"), right: lit(null) },
+        body: [
+          { op: "push", var: "path", value: v("at") },
+          { op: "set", var: "at", value: { getKey: v("prev"), key: v("at") } },
+        ],
+      },
+    ];
+    const result = await runMacro(macro(program), fakeHost().host);
+    expect(result).toMatchObject({ status: "done", vars: { path: ["2,2", "1,2", "1,1", "1,0", "0,0"] } });
+  });
+
+  it("expresses a depth-first search with a visited set and a stack", async () => {
+    const program: Stmt[] = [
+      { op: "set", var: "grid", value: grid },
+      { op: "set", var: "visited", value: lit({}) },
+      { op: "set", var: "order", value: lit([]) },
+      { op: "set", var: "stack", value: lit(["0,0"]) },
+      {
+        op: "while",
+        cond: { bin: ">", left: { length: v("stack") }, right: lit(0) },
+        body: [
+          { op: "popBack", var: "stack", saveAs: "cell" },
+          {
+            op: "if",
+            cond: { not: { contains: { keys: v("visited") }, item: v("cell") } },
+            then: [
+              { op: "setKey", var: "visited", key: v("cell"), value: lit(true) },
+              { op: "push", var: "order", value: v("cell") },
+              {
+                op: "forEach",
+                list: { getKey: v("grid"), key: v("cell") },
+                var: "next",
+                body: [{ op: "push", var: "stack", value: v("next") }],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const result = await runMacro(macro(program), fakeHost().host);
+    expect(result).toMatchObject({ status: "done", vars: { order: ["0,0", "1,0", "1,1", "1,2", "2,2", "2,0"] } });
+  });
+});

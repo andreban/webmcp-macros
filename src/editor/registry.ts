@@ -67,7 +67,22 @@ export interface StmtDef<N> {
 }
 
 /** An expression kind is its variant's identifying key. */
-export type ExprKind = "lit" | "input" | "var" | "get" | "bin" | "not" | "obj" | "list" | "toolAvailable" | "call";
+export type ExprKind =
+  | "lit"
+  | "input"
+  | "var"
+  | "get"
+  | "bin"
+  | "not"
+  | "obj"
+  | "list"
+  | "toolAvailable"
+  | "call"
+  | "getKey"
+  | "hasKey"
+  | "length"
+  | "contains"
+  | "keys";
 // Distributes over `K`: `Record<"a" | "b", …>` would demand both keys at once.
 export type ExprOf<K extends ExprKind> = K extends ExprKind ? Extract<Expr, Record<K, unknown>> : never;
 
@@ -149,6 +164,30 @@ export const statements: { [O in StmtOp]: StmtDef<StmtOf<O>> } = {
     label: [{ slot: "message", type: "value" }],
     create: () => ({ op: "fail", message: { lit: "" } }),
   },
+  setKey: {
+    category: "data",
+    verb: "set key",
+    label: [{ slot: "key", type: "value" }, " of ", { slot: "var", type: "var" }, " to ", { slot: "value", type: "value" }],
+    create: () => ({ op: "setKey", var: "", key: { lit: "" }, value: { lit: null } }),
+  },
+  push: {
+    category: "data",
+    verb: "add",
+    label: [{ slot: "value", type: "value" }, " to the end of ", { slot: "var", type: "var" }],
+    create: () => ({ op: "push", var: "", value: { lit: null } }),
+  },
+  popFront: {
+    category: "data",
+    verb: "take first of",
+    label: [{ slot: "var", type: "var" }, { slot: "saveAs", type: "var", prefix: " as " }],
+    create: () => ({ op: "popFront", var: "" }),
+  },
+  popBack: {
+    category: "data",
+    verb: "take last of",
+    label: [{ slot: "var", type: "var" }, { slot: "saveAs", type: "var", prefix: " as " }],
+    create: () => ({ op: "popBack", var: "" }),
+  },
 };
 
 export const expressions: { [K in ExprKind]: ExprDef<ExprOf<K>> } = {
@@ -174,6 +213,20 @@ export const expressions: { [K in ExprKind]: ExprDef<ExprOf<K>> } = {
     label: ["result of ", { slot: "call", type: "tool" }, " ", { slot: "args", type: "args" }],
     create: () => ({ call: "", args: {} }),
   },
+  getKey: {
+    label: [{ slot: "key", type: "value" }, " of ", { slot: "getKey", type: "value" }],
+    create: () => ({ getKey: { var: "" }, key: { lit: "" } }),
+  },
+  hasKey: {
+    label: [{ slot: "hasKey", type: "value" }, " has ", { slot: "key", type: "value" }, "?"],
+    create: () => ({ hasKey: { var: "" }, key: { lit: "" } }),
+  },
+  length: { label: ["length of ", { slot: "length", type: "value" }], create: () => ({ length: { var: "" } }) },
+  contains: {
+    label: [{ slot: "contains", type: "value" }, " contains ", { slot: "item", type: "value" }, "?"],
+    create: () => ({ contains: { var: "" }, item: { lit: null } }),
+  },
+  keys: { label: ["keys of ", { slot: "keys", type: "value" }], create: () => ({ keys: { var: "" } }) },
 };
 
 /** A new, empty statement of this kind; a fresh object on every call. */

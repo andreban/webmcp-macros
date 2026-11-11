@@ -55,6 +55,24 @@ describe("getNode", () => {
     expect(getNode(macro, ["program", 3, "args", "constructor"])).toEqual({ kind: "expr", node: undefined });
   });
 
+  it("reads the slots of data statements and expressions", () => {
+    const data: Macro = {
+      ...macro,
+      program: [
+        { op: "setKey", var: "d", key: { lit: "k" }, value: { length: { keys: { var: "d" } } } },
+        { op: "push", var: "q", value: { contains: { var: "q" }, item: { getKey: { var: "d" }, key: { lit: "k" } } } },
+        { op: "popFront", var: "q", saveAs: "x" },
+      ],
+    };
+    expect(getNode(data, ["program", 0, "key"])).toEqual({ kind: "expr", node: { lit: "k" } });
+    expect(getNode(data, ["program", 0, "value", "length", "keys"])).toEqual({ kind: "expr", node: { var: "d" } });
+    expect(getNode(data, ["program", 1, "value", "item", "key"])).toEqual({ kind: "expr", node: { lit: "k" } });
+    expect(getNode(data, ["program", 1, "value", "contains"])).toEqual({ kind: "expr", node: { var: "q" } });
+    // Variable names are not expression slots.
+    expect(getNode(data, ["program", 2, "saveAs"])).toBeUndefined();
+    expect(getNode(data, ["program", 0, "var"])).toBeUndefined();
+  });
+
   it.each([
     [["sites"]],
     [["program", 5]],

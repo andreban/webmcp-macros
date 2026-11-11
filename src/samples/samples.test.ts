@@ -32,6 +32,16 @@ function walkExpr(expr: Expr, refs: References): void {
   } else if ("call" in expr) {
     refs.tools.add(expr.call);
     walkArgs(expr.args, refs);
+  } else if ("getKey" in expr || "hasKey" in expr) {
+    walkExpr("getKey" in expr ? expr.getKey : expr.hasKey, refs);
+    walkExpr(expr.key, refs);
+  } else if ("contains" in expr) {
+    walkExpr(expr.contains, refs);
+    walkExpr(expr.item, refs);
+  } else if ("length" in expr) {
+    walkExpr(expr.length, refs);
+  } else if ("keys" in expr) {
+    walkExpr(expr.keys, refs);
   } else {
     throw new Error(`Unknown expression: ${JSON.stringify(expr satisfies never)}`);
   }
@@ -76,7 +86,16 @@ function walkStmts(stmts: Stmt[], refs: References): void {
       case "fail":
         walkExpr(stmt.message, refs);
         break;
+      case "setKey":
+        walkExpr(stmt.key, refs);
+        walkExpr(stmt.value, refs);
+        break;
+      case "push":
+        walkExpr(stmt.value, refs);
+        break;
       case "wait":
+      case "popFront":
+      case "popBack":
         break;
       default:
         throw new Error(`Unknown statement: ${JSON.stringify(stmt satisfies never)}`);

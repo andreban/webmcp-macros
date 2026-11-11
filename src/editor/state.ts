@@ -59,6 +59,10 @@ const STMT_SLOTS: { readonly [K in Stmt["op"]]: Slots } = {
   message: { text: "expr" },
   stop: { message: "expr" },
   fail: { message: "expr" },
+  setKey: { key: "expr", value: "expr" },
+  push: { value: "expr" },
+  popFront: {},
+  popBack: {},
 };
 
 function exprSlots(expr: Expr): Slots {
@@ -68,6 +72,11 @@ function exprSlots(expr: Expr): Slots {
   if ("obj" in expr) return { obj: "records" };
   if ("list" in expr) return { list: "items" };
   if ("call" in expr) return { args: "records" };
+  if ("getKey" in expr) return { getKey: "expr", key: "expr" };
+  if ("hasKey" in expr) return { hasKey: "expr", key: "expr" };
+  if ("length" in expr) return { length: "expr" };
+  if ("contains" in expr) return { contains: "expr", item: "expr" };
+  if ("keys" in expr) return { keys: "expr" };
   return {};
 }
 
