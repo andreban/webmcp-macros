@@ -2,6 +2,7 @@ import { type Dispatch, type KeyboardEvent as ReactKeyboardEvent, useEffect, use
 import type { Macro } from "../macro/types";
 import { loadMacros, saveMacro } from "../storage";
 import { ProgramView } from "../ui/ProgramView";
+import { InputsPanel } from "./InputsPanel";
 import { SitesPanel } from "./SitesPanel";
 import { createNewMacro, type EditorParams, editorPath, historyShortcut, isDirty } from "./page";
 import { createEditorState, type EditorAction, editorReducer, type EditorState } from "./state";
@@ -160,7 +161,7 @@ export function EditorView({ state, dispatch, status, canSave, onSave, tabId }: 
         value={macro.description ?? ""}
         onCommit={(text) => dispatch({ type: "setMeta", meta: { description: text || undefined } })}
       />
-      {/* Inputs (#34) and sites and trigger (#35) panels go here. */}
+      <InputsPanel macro={macro} dispatch={dispatch} />
       <SitesPanel macro={macro} dispatch={dispatch} tabId={tabId} />
       <section aria-labelledby="program-heading">
         <h2 id="program-heading">Program</h2>
