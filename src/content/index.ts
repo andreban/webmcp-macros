@@ -39,6 +39,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, reply) => {
 const isTopFrame = window === window.top;
 let macros: Macro[] = [];
 let matches: Macro[] = [];
+let pageTools: ToolInfo[] = [];
 let busy = false;
 let refreshes = 0;
 // A promise because the widget loads on demand; calls chained on it run in order.
@@ -46,6 +47,7 @@ let launcher: Promise<Launcher> | undefined;
 
 function applyLauncher(): void {
   const current = matches;
+  const tools = pageTools;
   const action = launcherAction(launcher !== undefined, current.length, busy);
   switch (action) {
     case "mount":
@@ -56,10 +58,10 @@ function applyLauncher(): void {
           applyLauncher();
         }),
       );
-      void launcher.then((mounted) => mounted.render(current));
+      void launcher.then((mounted) => mounted.render(current, tools));
       return;
     case "render":
-      void launcher?.then((mounted) => mounted.render(current));
+      void launcher?.then((mounted) => mounted.render(current, tools));
       return;
     case "unmount":
       void launcher?.then((mounted) => mounted.unmount());
@@ -78,6 +80,7 @@ async function refresh(): Promise<void> {
   // A later refresh started while this one listed tools; its answer is newer.
   if (id !== refreshes) return;
   // Only the top frame offers macros, so only its tools and URL are matched.
+  pageTools = tools;
   matches = isTopFrame ? matchingMacros(macros, location.href, tools.map((tool) => tool.name)) : [];
   const request: BackgroundRequest = { type: "tools-changed", tools, matches: matches.length };
   // Rejects when no extension page is listening; there is nothing to do then.

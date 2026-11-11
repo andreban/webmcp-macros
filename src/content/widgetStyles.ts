@@ -41,6 +41,7 @@ button.wmm-secondary { background: #fff; color: #1f2328; border-color: #d0d7de; 
 .wmm-run { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .wmm-macro ~ .wmm-run, .wmm-form ~ .wmm-run { margin-top: 10px; padding-top: 10px; border-top: 1px solid #eaeef2; }
 .wmm-status { margin: 0; overflow-wrap: anywhere; }
+.wmm-stale { color: #9a6700; white-space: nowrap; }
 @keyframes wmm-in { from { opacity: 0; } to { opacity: .75; } }
 @media (prefers-reduced-motion: reduce) { .wmm-launcher { animation: none; } }
 @media (prefers-color-scheme: dark) {
@@ -51,5 +52,6 @@ button.wmm-secondary { background: #fff; color: #1f2328; border-color: #d0d7de; 
   .wmm-macro + .wmm-macro, .wmm-macro ~ .wmm-run, .wmm-form ~ .wmm-run { border-color: #30363d; }
   .wmm-macro small, .wmm-field label { color: #8d96a0; }
   .wmm-error, .wmm-status.failed { color: #ff7b72; }
+  .wmm-stale { color: #d29922; }
 }
 `;
