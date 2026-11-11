@@ -30,7 +30,7 @@ const slotNames = (label: readonly (string | Slot)[]) =>
 
 describe("createDefault", () => {
   it("creates a node of the requested op for every statement", () => {
-    expect(ops).toHaveLength(15);
+    expect(ops).toHaveLength(16);
     for (const op of ops) expect(createDefault(op).op).toBe(op);
   });
 
@@ -64,7 +64,7 @@ describe("createDefault", () => {
 
 describe("exprKind", () => {
   it("identifies every expression kind by its key", () => {
-    expect(kinds).toHaveLength(15);
+    expect(kinds).toHaveLength(16);
     for (const kind of kinds) expect(exprKind(createDefaultExpr(kind))).toBe(kind);
   });
 

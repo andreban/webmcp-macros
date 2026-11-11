@@ -3,6 +3,13 @@
  * executed, with a program counter each, plus the variables and counters.
  * `step` in `interpreter.ts` advances it one statement at a time, so a run
  * can be saved after any step and continued later, even by another worker.
+ *
+ * A procedure call pushes a frame for the procedure's body that holds its
+ * variables, so a run paused inside a procedure saves its scope too. The
+ * calling statement is evaluated again when the call returns: the results of
+ * the calls it already made are kept in its frame and replayed, so no tool is
+ * called twice. Evaluation is otherwise pure and the caller's variables cannot
+ * change meanwhile, so the replay takes the same path.
  */
 import type { Json, Macro, Stmt } from "../macro/types";
 
@@ -21,6 +28,14 @@ export interface Frame {
   branch?: "then" | "else" | "body";
   pc: number;
   loop?: Loop;
+  /** Starts the body of a procedure call; `slot` is where the caller expects its result. */
+  call?: { proc: string; slot: number; locals: Record<string, Json> };
+  /**
+   * Results of the tool and procedure calls made so far by the statement at
+   * `pc` (or by the loop check at the end of the block), keyed by the order in
+   * which the calls start. Cleared when `pc` moves.
+   */
+  results?: Record<string, Json>;
 }
 
 export interface RunState {
@@ -37,15 +52,25 @@ export interface RunState {
   steps: number;
 }
 
+/** The index of the innermost procedure call's frame, or -1 outside any procedure. */
+export function callBase(frames: readonly Frame[]): number {
+  return frames.findLastIndex((frame) => frame.call !== undefined);
+}
+
 /**
  * Finds the statements of the top frame and the statement that owns them, by
- * walking the frames down from the program. `undefined` when the frames do not
- * fit the program, as a state saved for another version of the macro may not.
+ * walking the frames down from the program or the innermost procedure body.
+ * `undefined` when the frames do not fit the macro, as a state saved for
+ * another version of the macro may not.
  */
-export function locate(program: Stmt[], frames: readonly Frame[]): { block: Stmt[]; owner?: Stmt } | undefined {
-  let block = program;
+export function locate(macro: Macro, frames: readonly Frame[]): { block: Stmt[]; owner?: Stmt } | undefined {
+  const base = Math.max(0, callBase(frames));
+  const proc = frames[base]?.call?.proc;
+  const procs = macro.procedures ?? {};
+  let block = proc === undefined ? macro.program : Object.hasOwn(procs, proc) ? procs[proc]?.body : undefined;
+  if (!block) return undefined;
   let owner: Stmt | undefined;
-  for (let depth = 1; depth < frames.length; depth++) {
+  for (let depth = base + 1; depth < frames.length; depth++) {
     const parent = frames[depth - 1];
     const branch = frames[depth]?.branch;
     owner = parent && block[parent.pc];

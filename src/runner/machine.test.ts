@@ -86,6 +86,58 @@ describe("step", () => {
     expect(midLoop && midIf).toBe(true);
   });
 
+  it("pauses inside a procedure and resumes from JSON without repeating tool calls", async () => {
+    // r = double(1) + quad(3) + quad(1), where quad calls double twice.
+    const quad = { callProc: "quad", args: { x: lit(3) } };
+    const withProcs: Macro = {
+      ...macro([
+        {
+          op: "set",
+          var: "r",
+          value: {
+            bin: "+",
+            left: { bin: "+", left: { call: "double", args: { x: lit(1) } }, right: quad },
+            right: { ...quad, args: { x: lit(1) } },
+          },
+        },
+      ]),
+      procedures: {
+        quad: {
+          params: ["x"],
+          body: [
+            { op: "call", tool: "double", args: { x: v("x") }, saveAs: "d" },
+            { op: "return", value: { call: "double", args: { x: v("d") } } },
+          ],
+        },
+      },
+    };
+    const reference = fakeHost();
+    expect(await runMacro(withProcs, reference.host)).toMatchObject({ status: "done", vars: { r: 18 } });
+    expect(reference.calls).toEqual([1, 3, 6, 1, 2]);
+
+    let paused = false;
+    for (let stopAfter = 0; ; stopAfter++) {
+      const fake = fakeHost();
+      let state = startRun(withProcs);
+      for (let i = 0; i < stopAfter && state.status === "running"; i++) {
+        const before = JSON.stringify(state);
+        const next = await step(state, fake.host);
+        expect(JSON.stringify(state)).toBe(before);
+        state = next;
+      }
+      if (state.status !== "running") break;
+      const call = state.frames.at(-1)?.call;
+      if (call) {
+        paused = true;
+        expect(call).toMatchObject({ proc: "quad", locals: { x: expect.any(Number) } });
+      }
+      const restored: RunState = JSON.parse(JSON.stringify(state));
+      expect(await runToEnd(restored, fake.host)).toMatchObject({ status: "done", toolCalls: 5, vars: { r: 18 } });
+      expect(fake.calls).toEqual(reference.calls);
+    }
+    expect(paused).toBe(true);
+  });
+
   it("leaves the state it was given unchanged", async () => {
     let state = startRun(macro(program));
     const { host } = fakeHost();
@@ -122,10 +174,10 @@ describe("step", () => {
 describe("locate", () => {
   it("finds the block of the top frame and its owner", () => {
     const owner = program[2];
-    const found = locate(program, [{ pc: 2 }, { branch: "body", pc: 0, loop: { kind: "forEach", i: 0, items: [1] } }]);
+    const found = locate(macro(program), [{ pc: 2 }, { branch: "body", pc: 0, loop: { kind: "forEach", i: 0, items: [1] } }]);
     expect(found?.owner).toBe(owner);
     expect(found?.block).toBe(owner?.op === "forEach" ? owner.body : undefined);
-    expect(locate(program, [{ pc: 2 }, { branch: "then", pc: 0 }])).toBeUndefined();
-    expect(locate(program, [{ pc: 9 }, { branch: "body", pc: 0 }])).toBeUndefined();
+    expect(locate(macro(program), [{ pc: 2 }, { branch: "then", pc: 0 }])).toBeUndefined();
+    expect(locate(macro(program), [{ pc: 9 }, { branch: "body", pc: 0 }])).toBeUndefined();
   });
 });

@@ -63,6 +63,7 @@ const STMT_SLOTS: { readonly [K in Stmt["op"]]: Slots } = {
   push: { value: "expr" },
   popFront: {},
   popBack: {},
+  return: { value: "expr" },
 };
 
 function exprSlots(expr: Expr): Slots {
@@ -71,7 +72,7 @@ function exprSlots(expr: Expr): Slots {
   if ("not" in expr) return { not: "expr" };
   if ("obj" in expr) return { obj: "records" };
   if ("list" in expr) return { list: "items" };
-  if ("call" in expr) return { args: "records" };
+  if ("call" in expr || "callProc" in expr) return { args: "records" };
   if ("getKey" in expr) return { getKey: "expr", key: "expr" };
   if ("hasKey" in expr) return { hasKey: "expr", key: "expr" };
   if ("length" in expr) return { length: "expr" };

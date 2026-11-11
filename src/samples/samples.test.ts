@@ -32,6 +32,8 @@ function walkExpr(expr: Expr, refs: References): void {
   } else if ("call" in expr) {
     refs.tools.add(expr.call);
     walkArgs(expr.args, refs);
+  } else if ("callProc" in expr) {
+    walkArgs(expr.args, refs);
   } else if ("getKey" in expr || "hasKey" in expr) {
     walkExpr("getKey" in expr ? expr.getKey : expr.hasKey, refs);
     walkExpr(expr.key, refs);
@@ -92,6 +94,9 @@ function walkStmts(stmts: Stmt[], refs: References): void {
         break;
       case "push":
         walkExpr(stmt.value, refs);
+        break;
+      case "return":
+        if (stmt.value) walkExpr(stmt.value, refs);
         break;
       case "wait":
       case "popFront":
