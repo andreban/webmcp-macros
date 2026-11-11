@@ -7,7 +7,7 @@ import { isMacro, type Json, type Macro, type ToolInfo } from "./macro/types";
 import type { RunResult, StepInfo } from "./runner/interpreter";
 import type { NodePath } from "./runner/machine";
 
-/** Background or side panel → content script of a tab (top frame). */
+/** Background or side panel → the content script of one frame of a tab. */
 export type ContentRequest =
   | { type: "list-tools" }
   | { type: "execute-tool"; name: string; args: Record<string, Json> }

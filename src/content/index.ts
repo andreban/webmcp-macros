@@ -1,7 +1,7 @@
 /**
- * Content script, top frame only: answers tool requests from the background
- * through the WebMCP adapter, reports the page's tools and how many saved
- * macros match, and shows the launcher while one does.
+ * Content script, in every frame: answers tool requests from the background
+ * through the WebMCP adapter and reports this document's tools. The top frame
+ * also counts the saved macros that match and shows the launcher while one does.
  */
 import { matchingMacros } from "../macro/matcher";
 import type { Macro, ToolInfo } from "../macro/types";
@@ -35,6 +35,8 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, reply) => {
   return true;
 });
 
+// Same-origin and cross-origin iframes alike; `window.top` is readable from both.
+const isTopFrame = window === window.top;
 let macros: Macro[] = [];
 let matches: Macro[] = [];
 let busy = false;
@@ -75,7 +77,8 @@ async function refresh(): Promise<void> {
   const tools = await listTools().catch((): ToolInfo[] => []);
   // A later refresh started while this one listed tools; its answer is newer.
   if (id !== refreshes) return;
-  matches = matchingMacros(macros, location.href, tools.map((tool) => tool.name));
+  // Only the top frame offers macros, so only its tools and URL are matched.
+  matches = isTopFrame ? matchingMacros(macros, location.href, tools.map((tool) => tool.name)) : [];
   const request: BackgroundRequest = { type: "tools-changed", tools, matches: matches.length };
   // Rejects when no extension page is listening; there is nothing to do then.
   chrome.runtime.sendMessage(request).catch(() => {});
@@ -85,16 +88,21 @@ async function refresh(): Promise<void> {
 // Pages without WebMCP get no reports and no launcher; `list-tools` still answers `[]` there.
 if (isSupported()) {
   onToolsChanged(() => void refresh());
-  onMacrosChanged((next) => {
-    macros = next;
-    void refresh();
-  });
-  // Single-page apps change URL without reloading, so site patterns are re-checked.
-  window.navigation?.addEventListener("navigatesuccess", () => void refresh());
-  void loadMacros()
-    .catch((): Macro[] => [])
-    .then((loaded) => {
-      macros = loaded;
-      return refresh();
+  if (isTopFrame) {
+    onMacrosChanged((next) => {
+      macros = next;
+      void refresh();
     });
+    // Single-page apps change URL without reloading, so site patterns are re-checked.
+    window.navigation?.addEventListener("navigatesuccess", () => void refresh());
+    void loadMacros()
+      .catch((): Macro[] => [])
+      .then((loaded) => {
+        macros = loaded;
+        return refresh();
+      });
+  } else {
+    // An iframe has no macros to match; it only tells the background its tools.
+    void refresh();
+  }
 }
