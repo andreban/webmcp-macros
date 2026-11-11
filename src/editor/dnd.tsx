@@ -1,7 +1,7 @@
 // Drag and drop for the program, on the browser's native HTML5 events. A drop
 // dispatches the same `moveStmt` and `insertStmt` actions as Alt+arrows and the
 // palette, and the reducer decides what is allowed, so both ways in agree.
-import { type Dispatch, type DragEvent, type HTMLAttributes, useRef, useState } from "react";
+import { type Dispatch, type DragEvent, type HTMLAttributes, type PointerEvent, useRef, useState } from "react";
 import type { Macro } from "../macro/types";
 import { pathKey } from "./blockNav";
 import { createDefault, type StmtOp } from "./registry";
@@ -35,6 +35,27 @@ export const landedAt = (item: DragItem, to: Path): Path => (item.kind === "stmt
 // A type of our own, so a drop on a text field elsewhere does not paste anything.
 const MIME = "application/x-wmm-block";
 
+/**
+ * Chrome starts a drag of the draggable ancestor when the pointer moves with
+ * its button down in a text field, so the text in a slot could not be
+ * selected with the mouse. A press in a field turns dragging off on every
+ * draggable around it until the button is released. It runs in the capture
+ * phase so each enclosing block, not only the innermost, sees the press.
+ */
+function suspendDragInFields(event: PointerEvent<HTMLElement>) {
+  const target = event.target;
+  if (!(target instanceof Element) || !target.closest("input, textarea, select, [contenteditable]")) return;
+  const block = event.currentTarget;
+  block.draggable = false;
+  const restore = () => {
+    block.draggable = true;
+    window.removeEventListener("pointerup", restore, true);
+    window.removeEventListener("pointercancel", restore, true);
+  };
+  window.addEventListener("pointerup", restore, true);
+  window.addEventListener("pointercancel", restore, true);
+}
+
 type Side = "before" | "after" | "into";
 type DragProps = HTMLAttributes<HTMLElement> & { "data-drop"?: Side };
 
@@ -56,6 +77,7 @@ export function useBlockDrag(macro: Macro, dispatch: Dispatch<EditorAction>, onD
 
   const source = (item: DragItem): DragProps => ({
     draggable: true,
+    onPointerDownCapture: suspendDragInFields,
     onDragStart(event: DragEvent) {
       // Blocks nest; only the innermost one under the pointer is dragged.
       event.stopPropagation();
