@@ -1,4 +1,5 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
+import { resolveRelativeDate } from "../macro/relativeDate";
 import type { Json, JsonSchema, Macro, MacroInput } from "../macro/types";
 import { applyPreset } from "../presets";
 import { loadRememberedInputs } from "../storage";
@@ -35,8 +36,14 @@ function isOption(value: unknown): value is string | number | boolean {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
+/**
+ * A stored value as its field's initial text. Defaults, presets and remembered
+ * values all pass through here, so a relative date such as `today+14d` is
+ * resolved when the form opens for a run.
+ */
 function toFormValue(spec: FieldSpec, value: Json | undefined): FormValue {
   if (spec.kind === "checkbox") return value === true;
+  if (spec.kind === "date" && typeof value === "string") return resolveRelativeDate(value) ?? value;
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
 }
 
