@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { MACRO_VERSION, type Expr, type Macro } from "../macro/types";
-import { Slot, type SlotProps } from "./Slot";
+import { MACRO_VERSION, type Expr, type Macro, type Stmt } from "../macro/types";
+import { statements } from "./registry";
+import { Slot, type SlotProps, StmtSlot } from "./Slot";
 
 const macro: Macro = {
   wmm: MACRO_VERSION,
@@ -59,5 +60,54 @@ describe("Slot", () => {
     expect(html).toContain('aria-label="Add message"');
     expect(html).toContain(">+ message</button>");
     expect(html).not.toContain("<input");
+  });
+});
+
+/** Renders every slot of `stmt` as the program editor does, with bodies as a marker. */
+const renderStmt = (stmt: Stmt) =>
+  renderToStaticMarkup(
+    <>
+      {statements[stmt.op].label.map((part, index) =>
+        typeof part === "string" ? null : (
+          <StmtSlot
+            key={index}
+            macro={macro}
+            at={["program", 0]}
+            stmt={stmt}
+            part={part}
+            dispatch={() => {}}
+            renderBody={(body, at) => <i>{`${at.join("/")}:${body.length}`}</i>}
+          />
+        ),
+      )}
+    </>,
+  );
+
+describe("StmtSlot", () => {
+  it("edits leaf fields in place", () => {
+    const html = renderStmt({ op: "call", tool: "look", saveAs: "seen" });
+    expect(html).toMatch(/<option value="look" selected="">look_around<\/option>/);
+    expect(html).toContain('aria-label="new field name"'); // absent args edit as none
+    expect(html).toMatch(/ as <input[^>]*aria-label="variable"[^>]* value="seen"/);
+    expect(html).toContain('aria-label="Remove result name"');
+    expect(renderStmt({ op: "wait", ms: 250 })).toMatch(/aria-label="milliseconds"[^>]* value="250"/);
+  });
+
+  it("offers to add an absent optional field, and only an optional one", () => {
+    const html = renderStmt({ op: "waitForTool", tool: "look" });
+    expect(html).toContain(">+ time limit</button>");
+    expect(renderStmt({ op: "popFront", var: "queue" })).toContain(">+ result name</button>");
+    expect(renderStmt({ op: "stop" })).toContain('aria-label="Add message"');
+    expect(renderStmt({ op: "return" })).toContain('aria-label="Add value"');
+    expect(renderStmt({ op: "set", var: "x", value: { lit: 1 } })).not.toContain("Remove");
+  });
+
+  it("renders bodies through the editor, with the else branch removable", () => {
+    const withElse = renderStmt({ op: "if", cond: { lit: true }, then: [], else: [{ op: "stop" }] });
+    expect(withElse).toContain("<i>program/0/then:0</i>");
+    expect(withElse).toContain('<span class="wmm-verb">else</span><i>program/0/else:1</i>');
+    expect(withElse).toContain('aria-label="Remove else"');
+    expect(withElse).toContain('aria-label="Change condition"');
+    expect(renderStmt({ op: "if", cond: { lit: true }, then: [] })).toContain(">+ else</button>");
   });
 });
