@@ -1,11 +1,13 @@
 import { type Dispatch, type FocusEvent, Fragment, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
-import type { Macro, Stmt } from "../macro/types";
+import type { Macro, MacroTool, Stmt } from "../macro/types";
 import { focusAfterRemove, focusStops, insertionPoint, moveDestination, pathKey } from "./blockNav";
 import { type BlockDrag, useBlockDrag } from "./dnd";
 import { Palette } from "./Palette";
 import { createDefault, type Slot, type StmtOp, statements } from "./registry";
+import type { LivePage } from "./SitesPanel";
 import { StmtSlot } from "./Slot";
 import { type EditorAction, getNode, moveTarget, type Path } from "./state";
+import { ToolPalette } from "./ToolPalette";
 
 interface View {
   macro: Macro;
@@ -26,10 +28,12 @@ interface View {
 export function ProgramEditor({
   macro,
   dispatch,
+  page,
   running,
 }: {
   macro: Macro;
   dispatch: Dispatch<EditorAction>;
+  page?: LivePage;
   /** The statement a run is executing, highlighted. */
   running?: Path;
 }) {
@@ -106,9 +110,9 @@ export function ProgramEditor({
 
   const drag = useBlockDrag(macro, dispatch, go);
 
-  const insert = (op: StmtOp) => {
+  const insert = (stmt: Stmt, tools?: Record<string, MacroTool>) => {
     const at = insertionPoint(macro, current);
-    dispatch({ type: "insertStmt", at, stmt: createDefault(op) });
+    dispatch({ type: "insertStmt", at, stmt, tools });
     go(at);
   };
 
@@ -121,7 +125,13 @@ export function ProgramEditor({
       <div ref={root} onKeyDown={onKeyDown} onFocus={onFocus} onBlur={onBlur}>
         <Body view={view} body={macro.program} at={["program"]} />
       </div>
-      <Palette inputRef={paletteInput} onPick={insert} onCancel={() => go(current)} itemProps={drag.paletteItem} />
+      <Palette
+        inputRef={paletteInput}
+        onPick={(op: StmtOp) => insert(createDefault(op))}
+        onCancel={() => go(current)}
+        itemProps={drag.paletteItem}
+      />
+      <ToolPalette macro={macro} page={page} onPick={({ stmt, tools }) => insert(stmt, tools)} />
     </div>
   );
 }

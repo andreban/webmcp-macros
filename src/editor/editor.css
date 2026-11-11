@@ -12,6 +12,9 @@
 .palette-options { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; font-weight: normal; }
 .palette-options > li { cursor: pointer; }
 .palette-options > [aria-selected="true"] { outline: 2px solid var(--wmm-accent); }
+.tool-palette { display: grid; gap: 4px; margin-top: 12px; font-weight: 600; }
+.tool-palette .wmm-block { font: inherit; font-weight: normal; color: inherit; text-align: start; cursor: pointer; }
+.tool-palette .wmm-tool--absent { opacity: 0.6; border-style: dashed; }
 .wmm-slot { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; position: relative; }
 .wmm-slot-field { font: inherit; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--fg); }
 .wmm-slot-field[aria-invalid] { border-color: var(--danger); }

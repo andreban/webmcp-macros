@@ -1,6 +1,6 @@
 import { type Dispatch, type KeyboardEvent, useEffect, useId, useState } from "react";
 import { siteMatches, triggerSatisfied } from "../macro/matcher";
-import type { Macro, MacroTrigger } from "../macro/types";
+import type { Macro, MacroTrigger, ToolInfo } from "../macro/types";
 import type { ContentRequest } from "../messages";
 import { defaultTrigger } from "./defaultTrigger";
 import type { EditorAction } from "./state";
@@ -40,15 +40,30 @@ export function triggerStatus(macro: Macro, page: TabPage | undefined): string {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Tool names from a `list-tools` reply or a `tools-changed` message; anything malformed is dropped. */
-export function toolNames(value: unknown): string[] {
+/** The tab with its tools as the page reports them, schemas included. */
+export interface LivePage {
+  url: string;
+  tools: readonly ToolInfo[];
+}
+
+/**
+ * Tools from a `list-tools` reply or a `tools-changed` message. The page controls
+ * them: a tool without a name is dropped, and a malformed description or schema is left out.
+ */
+export function toolInfos(value: unknown): ToolInfo[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((tool: unknown) => (isRecord(tool) && typeof tool.name === "string" ? [tool.name] : []));
+  return value.flatMap((tool: unknown) => {
+    if (!isRecord(tool) || typeof tool.name !== "string") return [];
+    const info: ToolInfo = { name: tool.name };
+    if (typeof tool.description === "string") info.description = tool.description;
+    if (isRecord(tool.inputSchema)) info.inputSchema = tool.inputSchema;
+    return [info];
+  });
 }
 
 /** Follows the tab's URL and tools: content scripts broadcast `tools-changed` to extension pages too. */
-function useTabPage(tabId: number | undefined): TabPage | undefined {
-  const [page, setPage] = useState<TabPage>();
+export function useTabPage(tabId: number | undefined): LivePage | undefined {
+  const [page, setPage] = useState<LivePage>();
   useEffect(() => {
     if (tabId === undefined) return;
     let active = true;
@@ -56,11 +71,11 @@ function useTabPage(tabId: number | undefined): TabPage | undefined {
       const tab = await chrome.tabs.get(tabId).catch(() => undefined);
       const request: ContentRequest = { type: "list-tools" };
       const reply: unknown = await chrome.tabs.sendMessage(tabId, request).catch(() => []);
-      if (active) setPage(tab?.url === undefined ? undefined : { url: tab.url, tools: toolNames(reply) });
+      if (active) setPage(tab?.url === undefined ? undefined : { url: tab.url, tools: toolInfos(reply) });
     };
     const onMessage = (message: unknown, sender: chrome.runtime.MessageSender) => {
       if (sender.tab?.id !== tabId || !isRecord(message) || message.type !== "tools-changed") return;
-      const tools = toolNames(message.tools);
+      const tools = toolInfos(message.tools);
       setPage((current) => current && { ...current, tools });
     };
     const onUpdated = (updatedId: number, change: chrome.tabs.OnUpdatedInfo) => {
@@ -79,8 +94,8 @@ function useTabPage(tabId: number | undefined): TabPage | undefined {
 }
 
 /** Edits each site's URL patterns and the trigger's tool sets, and shows whether the trigger holds on the tab. */
-export function SitesPanel({ macro, dispatch, tabId }: { macro: Macro; dispatch: Dispatch<EditorAction>; tabId?: number }) {
-  const page = useTabPage(tabId);
+export function SitesPanel({ macro, dispatch, page: live }: { macro: Macro; dispatch: Dispatch<EditorAction>; page?: LivePage }) {
+  const page = live && { url: live.url, tools: live.tools.map((tool) => tool.name) };
   const { trigger } = macro;
   const setTrigger = (next: MacroTrigger) => dispatch({ type: "setMeta", meta: { trigger: next } });
   const siteTools = Object.entries(macro.tools).filter(([, tool]) => tool.site === trigger.site);
