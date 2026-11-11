@@ -1,4 +1,5 @@
-import type { Expr } from "../macro/types";
+import type { Expr, Macro } from "../macro/types";
+import type { LiteralType } from "./ExprPicker";
 
 /**
  * Argument slots for a call block, read from a tool's `inputSchema`. The
@@ -101,4 +102,46 @@ export function defaultArg(kind: ArgKind): Expr {
 /** The arguments a new call block starts with: every required slot, at its default. */
 export function requiredArgs(slots: readonly ArgSlot[]): Record<string, Expr> {
   return Object.fromEntries(slots.filter((slot) => slot.required).map((slot) => [slot.key, defaultArg(slot.kind)]));
+}
+
+/**
+ * The argument slots of a call to `alias`, from the schema saved in the macro.
+ * `undefined` when the tool is unknown or has no saved schema: the editor then
+ * edits the arguments as a free-form record.
+ */
+export function toolArgSlots(macro: Macro, alias: string): ArgSlot[] | undefined {
+  const schema = Object.hasOwn(macro.tools, alias) ? macro.tools[alias]?.inputSchema : undefined;
+  return schema === undefined ? undefined : schemaSlots(schema);
+}
+
+/** The schema's arguments that `args` does not set yet, in the schema's order: the keys to offer. */
+export function missingArgs(slots: readonly ArgSlot[], args: Readonly<Record<string, Expr>>): ArgSlot[] {
+  return slots.filter((slot) => !Object.hasOwn(args, slot.key));
+}
+
+/**
+ * What a newly added argument starts as: its schema default for a key the
+ * schema knows, null for any other key (which stays allowed, so a macro written
+ * against an older schema can be fixed by hand).
+ */
+export function newArg(slots: readonly ArgSlot[] | undefined, key: string): Expr {
+  const slot = slots?.find((candidate) => candidate.key === key);
+  return slot ? defaultArg(slot.kind) : { lit: null };
+}
+
+/** How a literal in a slot of this kind is typed and shown; enums and untyped slots take any value. */
+export function literalType(kind: ArgKind): LiteralType {
+  switch (kind.type) {
+    case "enum":
+    case "any":
+      return "any";
+    case "text":
+    case "number":
+    case "boolean":
+    case "list":
+    case "object":
+      return kind.type;
+    default:
+      throw new Error(`Unknown argument kind: ${JSON.stringify(kind satisfies never)}`);
+  }
 }
