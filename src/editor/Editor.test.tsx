@@ -28,6 +28,15 @@ describe("EditorView", () => {
     expect(html).toContain(`<title>${rocketLauncherMacro.name} · WebMCP Macros</title>`);
   });
 
+  it("highlights the statement a run is executing", () => {
+    const html = render({ running: ["program", 0] });
+    const highlighted = [...html.matchAll(/<div class="[^"]*wmm-block--running"[^>]*>/g)].map((m) => m[0]);
+    expect(highlighted).toHaveLength(1);
+    expect(highlighted[0]).toContain('aria-current="step"');
+    expect(highlighted[0]).toContain('data-path="[&quot;program&quot;,0]"');
+    expect(render()).not.toContain("wmm-block--running");
+  });
+
   it("announces the save status in a live region", () => {
     expect(render({ status: "Unsaved changes" })).toMatch(/<span role="status"[^>]*>Unsaved changes<\/span>/);
   });

@@ -18,3 +18,9 @@
 .wmm-slot-error { color: var(--danger); }
 .wmm-slot-button { padding: 0 4px; line-height: 1.3; }
 .wmm-picker { position: absolute; top: 100%; left: 0; z-index: 1; font: inherit; }
+.run-bar > .toolbar > h2 { margin: 0; }
+.run-bar .status.failed { color: var(--danger); }
+.run-log { margin: 0 0 12px; padding-left: 24px; max-height: 12em; overflow: auto; font-size: 0.9em; }
+.run-log code { overflow-wrap: anywhere; }
+/* An outline as well as the colour, so the highlight does not rely on colour alone. */
+.wmm-block--running { outline: 2px solid var(--wmm-accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--wmm-accent) 25%, transparent); }

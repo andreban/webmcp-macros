@@ -1,11 +1,14 @@
-import { type Dispatch, type KeyboardEvent as ReactKeyboardEvent, useEffect, useReducer, useState } from "react";
+import { type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useReducer, useState } from "react";
 import type { Macro } from "../macro/types";
+import type { NodePath } from "../runner/machine";
 import { loadMacros, saveMacro } from "../storage";
 import { InputsPanel } from "./InputsPanel";
 import { createNewMacro, type EditorParams, editorPath, historyShortcut, isDirty } from "./page";
 import { ProgramEditor } from "./ProgramEditor";
+import { RunBar } from "./RunBar";
 import { SitesPanel } from "./SitesPanel";
 import { createEditorState, type EditorAction, editorReducer, type EditorState } from "./state";
+import { useEditorRun } from "./useEditorRun";
 
 type Loaded =
   | { status: "loading" }
@@ -58,6 +61,7 @@ function EditorSession({ initial, isNew, tabId }: { initial: Macro; isNew: boole
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const dirty = isDirty(state.macro, baseline);
+  const { start, stop, clear, ...trace } = useEditorRun(tabId);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -105,6 +109,17 @@ function EditorSession({ initial, isNew, tabId }: { initial: Macro; isNew: boole
       canSave={!saving && (dirty || !everSaved)}
       onSave={() => void save()}
       tabId={tabId}
+      runBar={
+        <RunBar
+          macro={state.macro}
+          tabId={tabId}
+          trace={trace}
+          onRun={(inputs) => start(state.macro, inputs)}
+          onStop={stop}
+          onDismiss={clear}
+        />
+      }
+      running={trace.at}
     />
   );
 }
@@ -119,10 +134,14 @@ export interface EditorViewProps {
   onSave: () => void;
   /** The tab the macro is edited against, if any. */
   tabId?: number;
+  /** Runs the macro; rendered above the program. */
+  runBar?: ReactNode;
+  /** The statement a run is executing, highlighted in the program. */
+  running?: NodePath;
 }
 
 /** The editor's layout, from state passed in, so it renders without `chrome.*`. */
-export function EditorView({ state, dispatch, status, canSave, onSave, tabId }: EditorViewProps) {
+export function EditorView({ state, dispatch, status, canSave, onSave, tabId, runBar, running }: EditorViewProps) {
   const { macro } = state;
   return (
     <main className="editor">
@@ -163,9 +182,10 @@ export function EditorView({ state, dispatch, status, canSave, onSave, tabId }: 
       />
       <InputsPanel macro={macro} dispatch={dispatch} />
       <SitesPanel macro={macro} dispatch={dispatch} tabId={tabId} />
+      {runBar}
       <section aria-labelledby="program-heading">
         <h2 id="program-heading">Program</h2>
-        <ProgramEditor macro={macro} dispatch={dispatch} />
+        <ProgramEditor macro={macro} dispatch={dispatch} running={running} />
       </section>
     </main>
   );
