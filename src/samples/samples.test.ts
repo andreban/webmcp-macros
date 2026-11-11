@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isMacro, type Expr, type Macro, type Stmt } from "../macro/types";
-import { adventureMacro, flightSearchMacro, rocketLauncherMacro, sampleMacros } from "./index";
+import { adventureMacro, flightSearchMacro, mazeMacro, rocketLauncherMacro, sampleMacros } from "./index";
 
 /** Every tool alias and input key a program refers to, at any depth. */
 interface References {
@@ -155,7 +155,7 @@ describe("references", () => {
 
 describe("sample macros", () => {
   it("bundles the acceptance macros", () => {
-    expect(sampleMacros).toEqual([rocketLauncherMacro, flightSearchMacro, adventureMacro]);
+    expect(sampleMacros).toEqual([rocketLauncherMacro, flightSearchMacro, adventureMacro, mazeMacro]);
   });
 
   it("have unique ids", () => {
