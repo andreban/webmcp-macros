@@ -4,6 +4,7 @@
  * never written into a macro, so they never reach a share string.
  */
 import { isMacro, type Json, type Macro } from "./macro/types";
+import { presetsKey } from "./presets";
 import { sampleMacros } from "./samples";
 
 const MACROS_KEY = "macros";
@@ -35,11 +36,11 @@ export async function saveMacro(macro: Macro): Promise<void> {
   await chrome.storage.local.set({ [MACROS_KEY]: next });
 }
 
-/** Deletes the macro with `macroId` and its remembered inputs. */
+/** Deletes the macro with `macroId`, its remembered inputs and its presets. */
 export async function deleteMacro(macroId: string): Promise<void> {
   const macros = await loadMacros();
   await chrome.storage.local.set({ [MACROS_KEY]: macros.filter((macro) => macro.id !== macroId) });
-  await chrome.storage.local.remove(inputsKey(macroId));
+  await chrome.storage.local.remove([inputsKey(macroId), presetsKey(macroId)]);
 }
 
 /**
