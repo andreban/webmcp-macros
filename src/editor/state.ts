@@ -201,6 +201,8 @@ const OPTIONAL: { readonly [O in Stmt["op"]]?: readonly OptionalKeys<Extract<Stm
   waitForTool: ["timeoutMs"],
   stop: ["message"],
   return: ["value"],
+  popFront: ["saveAs"],
+  popBack: ["saveAs"],
 };
 
 /** Whether `field` of an `op` statement may be absent, so the editor can add and remove it. */
