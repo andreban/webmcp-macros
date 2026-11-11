@@ -2,6 +2,7 @@ import { type Dispatch, type FocusEvent, Fragment, type KeyboardEvent, useEffect
 import type { Macro, Stmt } from "../macro/types";
 import { SlotView } from "../ui/ProgramView";
 import { focusAfterRemove, focusStops, insertionPoint, moveDestination, pathKey } from "./blockNav";
+import { type BlockDrag, useBlockDrag } from "./dnd";
 import { Palette } from "./Palette";
 import { createDefault, readSlot, type Slot, type StmtOp, statements } from "./registry";
 import { type EditorAction, getNode, moveTarget, type Path } from "./state";
@@ -11,6 +12,7 @@ interface View {
   /** The one block in the tab order. */
   tabStop: string;
   hintId: string;
+  drag: BlockDrag;
 }
 
 /**
@@ -85,22 +87,24 @@ export function ProgramEditor({ macro, dispatch }: { macro: Macro; dispatch: Dis
     if (next) go(next);
   };
 
+  const drag = useBlockDrag(macro, dispatch, go);
+
   const insert = (op: StmtOp) => {
     const at = insertionPoint(macro, current);
     dispatch({ type: "insertStmt", at, stmt: createDefault(op) });
     go(at);
   };
 
-  const view: View = { macro, tabStop: pathKey(current), hintId };
+  const view: View = { macro, tabStop: pathKey(current), hintId, drag };
   return (
     <div className="wmm-program">
       <p id={hintId} className="muted">
-        Arrow keys move between blocks, Alt+Up and Alt+Down move a block, Delete removes it, and / inserts after it.
+        Arrow keys move between blocks, Alt+Up and Alt+Down move a block, Delete removes it, and / inserts after it. Blocks can also be dragged.
       </p>
       <div ref={root} onKeyDown={onKeyDown} onFocus={onFocus} onBlur={onBlur}>
         <Body view={view} body={macro.program} at={["program"]} />
       </div>
-      <Palette inputRef={paletteInput} onPick={insert} onCancel={() => go(current)} />
+      <Palette inputRef={paletteInput} onPick={insert} onCancel={() => go(current)} itemProps={drag.paletteItem} />
     </div>
   );
 }
@@ -115,7 +119,7 @@ function Body({ view, body, at }: { view: View; body: readonly Stmt[]; at: Path 
     <ol className="wmm-blocks">
       {body.length === 0 ? (
         <li>
-          <div className="wmm-empty" {...stop(view, [...at, 0])}>
+          <div className="wmm-empty" {...stop(view, [...at, 0])} {...view.drag.empty([...at, 0])}>
             empty
           </div>
         </li>
@@ -136,7 +140,7 @@ function Block({ view, stmt, at }: { view: View; stmt: Stmt; at: Path }) {
   const { category, verb } = statements[stmt.op];
   const label: readonly (string | Slot)[] = statements[stmt.op].label;
   return (
-    <div className={`wmm-block wmm-block--${category}`} {...stop(view, at)}>
+    <div className={`wmm-block wmm-block--${category}`} {...stop(view, at)} {...view.drag.block(at)}>
       <span className="wmm-verb">{verb}</span>{" "}
       {label.map((part, index) => {
         if (typeof part === "string") return <Fragment key={index}>{part}</Fragment>;
