@@ -12,6 +12,8 @@ import { ToolPalette } from "./ToolPalette";
 interface View {
   macro: Macro;
   dispatch: Dispatch<EditorAction>;
+  /** The `pathKey` of the statement a run is executing. */
+  running?: string;
   /** The one block in the tab order. */
   tabStop: string;
   hintId: string;
@@ -23,7 +25,18 @@ interface View {
  * order, and the arrow keys move through every statement and empty body.
  * Which one is focused is transient UI state, kept as a path into the macro.
  */
-export function ProgramEditor({ macro, dispatch, page }: { macro: Macro; dispatch: Dispatch<EditorAction>; page?: LivePage }) {
+export function ProgramEditor({
+  macro,
+  dispatch,
+  page,
+  running,
+}: {
+  macro: Macro;
+  dispatch: Dispatch<EditorAction>;
+  page?: LivePage;
+  /** The statement a run is executing, highlighted. */
+  running?: Path;
+}) {
   const [focus, setFocus] = useState<Path>(["program", 0]);
   // Set by keyboard and palette actions only, so a re-render never steals focus.
   const moveFocus = useRef(false);
@@ -103,7 +116,7 @@ export function ProgramEditor({ macro, dispatch, page }: { macro: Macro; dispatc
     go(at);
   };
 
-  const view: View = { macro, dispatch, tabStop: pathKey(current), hintId, drag };
+  const view: View = { macro, dispatch, running: running && pathKey(running), tabStop: pathKey(current), hintId, drag };
   return (
     <div className="wmm-program">
       <p id={hintId} className="muted">
@@ -153,8 +166,14 @@ function Body({ view, body, at }: { view: View; body: readonly Stmt[]; at: Path 
 function Block({ view, stmt, at }: { view: View; stmt: Stmt; at: Path }) {
   const { category, verb } = statements[stmt.op];
   const label: readonly (string | Slot)[] = statements[stmt.op].label;
+  const isRunning = view.running === pathKey(at);
   return (
-    <div className={`wmm-block wmm-block--${category}`} {...stop(view, at)} {...view.drag.block(at)}>
+    <div
+      className={`wmm-block wmm-block--${category}${isRunning ? " wmm-block--running" : ""}`}
+      aria-current={isRunning ? "step" : undefined}
+      {...stop(view, at)}
+      {...view.drag.block(at)}
+    >
       <span className="wmm-verb">{verb}</span>{" "}
       {label.map((part, index) =>
         // A label is fixed per op, so the position is a stable key.
