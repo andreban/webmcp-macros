@@ -4,7 +4,7 @@ import { loadMacros, saveMacro } from "../storage";
 import { InputsPanel } from "./InputsPanel";
 import { createNewMacro, type EditorParams, editorPath, historyShortcut, isDirty } from "./page";
 import { ProgramEditor } from "./ProgramEditor";
-import { SitesPanel } from "./SitesPanel";
+import { SitesPanel, useTabPage } from "./SitesPanel";
 import { createEditorState, type EditorAction, editorReducer, type EditorState } from "./state";
 
 type Loaded =
@@ -124,6 +124,7 @@ export interface EditorViewProps {
 /** The editor's layout, from state passed in, so it renders without `chrome.*`. */
 export function EditorView({ state, dispatch, status, canSave, onSave, tabId }: EditorViewProps) {
   const { macro } = state;
+  const page = useTabPage(tabId);
   return (
     <main className="editor">
       <title>{`${macro.name || "Untitled macro"} · WebMCP Macros`}</title>
@@ -162,10 +163,10 @@ export function EditorView({ state, dispatch, status, canSave, onSave, tabId }: 
         onCommit={(text) => dispatch({ type: "setMeta", meta: { description: text || undefined } })}
       />
       <InputsPanel macro={macro} dispatch={dispatch} />
-      <SitesPanel macro={macro} dispatch={dispatch} tabId={tabId} />
+      <SitesPanel macro={macro} dispatch={dispatch} page={page} />
       <section aria-labelledby="program-heading">
         <h2 id="program-heading">Program</h2>
-        <ProgramEditor macro={macro} dispatch={dispatch} />
+        <ProgramEditor macro={macro} dispatch={dispatch} page={page} />
       </section>
     </main>
   );

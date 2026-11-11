@@ -31,6 +31,8 @@ export interface MacroTool {
   name: string;
   /** Hash of the tool's inputSchema when the macro was authored. */
   schemaHash?: string;
+  /** The tool's inputSchema as the editor last saw it, so the macro can be edited away from the page. */
+  inputSchema?: JsonSchema;
 }
 
 export interface MacroTrigger {

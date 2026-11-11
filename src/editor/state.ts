@@ -1,6 +1,6 @@
 // Editor state: the macro JSON plus undo/redo history, changed only through
 // `editorReducer`. Nodes are addressed by paths, so there is no second model.
-import type { Expr, Macro, MacroInput, Stmt } from "../macro/types";
+import type { Expr, Macro, MacroInput, MacroTool, Stmt } from "../macro/types";
 
 /**
  * From the macro root: `["program", 2, "then", 0]` is a statement, `["program", 0, "cond"]`
@@ -18,7 +18,8 @@ export type Located =
 export type MacroMeta = Omit<Macro, "wmm" | "id" | "program">;
 
 export type EditorAction =
-  | { type: "insertStmt"; at: Path; stmt: Stmt }
+  /** `tools` are merged into `Macro.tools` in the same undo step, for a call to a newly added tool. */
+  | { type: "insertStmt"; at: Path; stmt: Stmt; tools?: Record<string, MacroTool> }
   | { type: "removeStmt"; at: Path }
   /** `to` is a position in the macro as it is before the move. */
   | { type: "moveStmt"; from: Path; to: Path }
@@ -315,7 +316,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
   const { macro, past, future } = state;
   switch (action.type) {
     case "insertStmt":
-      return commit(state, insertStmt(macro, action.at, action.stmt));
+      return commit(
+        state,
+        insertStmt(action.tools ? { ...macro, tools: { ...macro.tools, ...action.tools } } : macro, action.at, action.stmt),
+      );
     case "removeStmt":
       return commit(state, removeStmt(macro, action.at));
     case "moveStmt":

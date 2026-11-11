@@ -1,10 +1,12 @@
 import { type Dispatch, type FocusEvent, Fragment, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
-import type { Macro, Stmt } from "../macro/types";
+import type { Macro, MacroTool, Stmt } from "../macro/types";
 import { SlotView } from "../ui/ProgramView";
 import { focusAfterRemove, focusStops, insertionPoint, moveDestination, pathKey } from "./blockNav";
 import { Palette } from "./Palette";
 import { createDefault, readSlot, type Slot, type StmtOp, statements } from "./registry";
+import type { LivePage } from "./SitesPanel";
 import { type EditorAction, getNode, moveTarget, type Path } from "./state";
+import { ToolPalette } from "./ToolPalette";
 
 interface View {
   macro: Macro;
@@ -18,7 +20,7 @@ interface View {
  * order, and the arrow keys move through every statement and empty body.
  * Which one is focused is transient UI state, kept as a path into the macro.
  */
-export function ProgramEditor({ macro, dispatch }: { macro: Macro; dispatch: Dispatch<EditorAction> }) {
+export function ProgramEditor({ macro, dispatch, page }: { macro: Macro; dispatch: Dispatch<EditorAction>; page?: LivePage }) {
   const [focus, setFocus] = useState<Path>(["program", 0]);
   // Set by keyboard and palette actions only, so a re-render never steals focus.
   const moveFocus = useRef(false);
@@ -85,9 +87,9 @@ export function ProgramEditor({ macro, dispatch }: { macro: Macro; dispatch: Dis
     if (next) go(next);
   };
 
-  const insert = (op: StmtOp) => {
+  const insert = (stmt: Stmt, tools?: Record<string, MacroTool>) => {
     const at = insertionPoint(macro, current);
-    dispatch({ type: "insertStmt", at, stmt: createDefault(op) });
+    dispatch({ type: "insertStmt", at, stmt, tools });
     go(at);
   };
 
@@ -100,7 +102,8 @@ export function ProgramEditor({ macro, dispatch }: { macro: Macro; dispatch: Dis
       <div ref={root} onKeyDown={onKeyDown} onFocus={onFocus} onBlur={onBlur}>
         <Body view={view} body={macro.program} at={["program"]} />
       </div>
-      <Palette inputRef={paletteInput} onPick={insert} onCancel={() => go(current)} />
+      <Palette inputRef={paletteInput} onPick={(op: StmtOp) => insert(createDefault(op))} onCancel={() => go(current)} />
+      <ToolPalette macro={macro} page={page} onPick={({ stmt, tools }) => insert(stmt, tools)} />
     </div>
   );
 }
