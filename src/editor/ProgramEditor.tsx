@@ -1,14 +1,15 @@
 import { type Dispatch, type FocusEvent, Fragment, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import type { Macro, Stmt } from "../macro/types";
-import { SlotView } from "../ui/ProgramView";
 import { focusAfterRemove, focusStops, insertionPoint, moveDestination, pathKey } from "./blockNav";
 import { type BlockDrag, useBlockDrag } from "./dnd";
 import { Palette } from "./Palette";
-import { createDefault, readSlot, type Slot, type StmtOp, statements } from "./registry";
+import { createDefault, type Slot, type StmtOp, statements } from "./registry";
+import { StmtSlot } from "./Slot";
 import { type EditorAction, getNode, moveTarget, type Path } from "./state";
 
 interface View {
   macro: Macro;
+  dispatch: Dispatch<EditorAction>;
   /** The one block in the tab order. */
   tabStop: string;
   hintId: string;
@@ -53,6 +54,8 @@ export function ProgramEditor({ macro, dispatch }: { macro: Macro; dispatch: Dis
 
   const onFocus = (event: FocusEvent) => {
     hasFocus.current = true;
+    // A slot control taking focus leaves the tab stop where it is; moving it
+    // here would re-render the block and could pull focus back to it.
     const { at } = stopAt(event.target);
     if (at) setFocus(at);
   };
@@ -62,6 +65,9 @@ export function ProgramEditor({ macro, dispatch }: { macro: Macro; dispatch: Dis
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
+    // Only a key pressed on a block itself moves, removes or inserts blocks. Keys
+    // from the inputs, selects and buttons of its slots have no `data-path`, so
+    // they stay with the control (arrows move the caret, Delete edits the text).
     const { index, at } = stopAt(event.target);
     // Control and Meta combinations belong to the page (undo, redo).
     if (!at || event.ctrlKey || event.metaKey) return;
@@ -95,7 +101,7 @@ export function ProgramEditor({ macro, dispatch }: { macro: Macro; dispatch: Dis
     go(at);
   };
 
-  const view: View = { macro, tabStop: pathKey(current), hintId, drag };
+  const view: View = { macro, dispatch, tabStop: pathKey(current), hintId, drag };
   return (
     <div className="wmm-program">
       <p id={hintId} className="muted">
@@ -135,29 +141,29 @@ function Body({ view, body, at }: { view: View; body: readonly Stmt[]; at: Path 
   );
 }
 
-/** Like ProgramView's block, but its bodies are editable and the block takes focus. */
+/** Like ProgramView's block, but its slots are editable and the block takes focus. */
 function Block({ view, stmt, at }: { view: View; stmt: Stmt; at: Path }) {
   const { category, verb } = statements[stmt.op];
   const label: readonly (string | Slot)[] = statements[stmt.op].label;
   return (
     <div className={`wmm-block wmm-block--${category}`} {...stop(view, at)} {...view.drag.block(at)}>
       <span className="wmm-verb">{verb}</span>{" "}
-      {label.map((part, index) => {
-        if (typeof part === "string") return <Fragment key={index}>{part}</Fragment>;
-        const slot = readSlot(stmt, part);
-        if (slot === undefined) return null;
-        const prefix = part.prefix === undefined ? null : slot.type === "body" ? <span className="wmm-verb">{part.prefix}</span> : part.prefix;
-        return (
-          <Fragment key={index}>
-            {prefix}
-            {slot.type === "body" ? (
-              <Body view={view} body={slot.value} at={[...at, part.slot]} />
-            ) : (
-              <SlotView macro={view.macro} slot={slot} />
-            )}
-          </Fragment>
-        );
-      })}
+      {label.map((part, index) =>
+        // A label is fixed per op, so the position is a stable key.
+        typeof part === "string" ? (
+          <Fragment key={index}>{part}</Fragment>
+        ) : (
+          <StmtSlot
+            key={index}
+            macro={view.macro}
+            at={at}
+            stmt={stmt}
+            part={part}
+            dispatch={view.dispatch}
+            renderBody={(body, path) => <Body view={view} body={body} at={path} />}
+          />
+        ),
+      )}
     </div>
   );
 }
