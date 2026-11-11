@@ -43,7 +43,10 @@ export interface MacroInput {
   key: string;
   label: string;
   schema: JsonSchema;
-  /** ask: always empty. remember: pre-filled with the last value used. */
+  /**
+   * ask: pre-filled with `default`, if any. remember: pre-filled with the last
+   * value used, falling back to `default`.
+   */
   mode?: "ask" | "remember";
   default?: Json;
 }
