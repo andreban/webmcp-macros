@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Json } from "../macro/types";
 import { runMacro, type ToolHost } from "../runner/interpreter";
 import { tripPlanMacro } from "./tripPlan";
 
-type Tool = (args: Record<string, Json>) => Json;
+type Tool = (args: Record<string, Json>) => Json | Promise<Json>;
 
 const DAY_MS = 86_400_000;
 
@@ -11,9 +11,10 @@ const DAY_MS = 86_400_000;
  * The three demos, reduced to what the macro relies on: the flight results
  * tools and the hotel results tool appear only after a search, and the
  * spreadsheet refuses a sheet name in use with `{ error }`, takes typed text
- * and evaluates the one formula the macro writes.
+ * and evaluates the one formula the macro writes. The text editor answers
+ * `create_document` once `approval` settles, as its modal does.
  */
-function fakeDemos(options: { sheets?: string[] } = {}) {
+function fakeDemos(options: { sheets?: string[]; approval?: Promise<boolean> } = {}) {
   const flights = [
     { id: 1, airline: "Air France", origin: "LHR", destination: "CDG", departureTime: "09:10", stops: 0, price: 310 },
     { id: 2, airline: "Iberia", origin: "LGW", destination: "ORY", departureTime: "07:45", stops: 1, price: 120 },
@@ -29,6 +30,9 @@ function fakeDemos(options: { sheets?: string[] } = {}) {
   const writes: { range: string; values: Json }[] = [];
   const state = { stops: [] as Json[], searched: false, hotelQuery: "" };
   const calls: string[] = [];
+  const documents: { title: Json; content: Json }[] = [];
+  const messages: string[] = [];
+  const waits: { name: string; timeoutMs: number }[] = [];
 
   const pages: Record<string, Record<string, Tool>> = {
     flights: {
@@ -66,6 +70,13 @@ function fakeDemos(options: { sheets?: string[] } = {}) {
         return { range: String(range), values: computed };
       },
     },
+    editor: {
+      create_document: async ({ title, content }): Promise<Json> => {
+        if (!(await (options.approval ?? true))) return { error: "User rejected creating the document.", code: "REJECTED" };
+        documents.push({ title: title ?? null, content: content ?? null });
+        return { created: true, id: "doc-1", title: title ?? null };
+      },
+    },
   };
   const present = (site: string, name: string): boolean => {
     if (!Object.hasOwn(pages[site] ?? {}, name)) return false;
@@ -83,11 +94,13 @@ function fakeDemos(options: { sheets?: string[] } = {}) {
     async isToolAvailable(name, site) {
       return present(site, name);
     },
-    async waitForTool(name, _timeoutMs, site) {
+    async waitForTool(name, timeoutMs, site) {
+      waits.push({ name, timeoutMs });
       if (!present(site, name)) throw new Error(`Timed out waiting for ${name}`);
     },
+    message: (text) => messages.push(text),
   };
-  return { host, calls, writes, state, sheets };
+  return { host, calls, writes, state, sheets, documents, messages, waits };
 }
 
 function daysBetween(values: Json[]): Json {
@@ -120,6 +133,7 @@ describe("tripPlanMacro", () => {
       "hotels:search_location",
       "hotels:get_hotel_search_results",
       "sheet:set_values",
+      "editor:create_document",
     ]);
     expect(demos.writes).toEqual([
       {
@@ -188,5 +202,88 @@ describe("tripPlanMacro", () => {
 
     expect(result).toMatchObject({ status: "failed", message: "Leave must be after Arrive." });
     expect(demos.calls).not.toContain("hotels:search_location");
+  });
+});
+
+describe("tripPlanMacro's summary in the text editor", () => {
+  it("saves the picks as a new Markdown document", async () => {
+    const demos = fakeDemos();
+    const result = await runMacro(tripPlanMacro, demos.host, { inputs });
+
+    expect(result.status).toBe("done");
+    expect(demos.documents).toEqual([
+      {
+        title: "Trip to Paris",
+        content: [
+          "# Trip to Paris",
+          "",
+          "2026-12-01 to 2026-12-05, 4 nights for 2. Details are in sheet Trip to Paris.",
+          "",
+          "## Cheapest flights",
+          "",
+          "- Iberia, LGW to ORY at 07:45, stops: 1, $120",
+          "- Lufthansa, LCY to CDG at 12:00, stops: 1, $180",
+          "- British Airways, LHR to ORY at 18:30, stops: 0, $205",
+          "",
+          "## Cheapest hotels",
+          "",
+          "- L'Atelier Marais, rated 4.6: $160 a night, $640 in all",
+          "- L'Atelier Rive Gauche, rated 4.9: $420 a night, $1680 in all",
+          "",
+        ].join("\n"),
+      },
+    ]);
+    expect(demos.messages).toEqual([
+      "Approve the new document in the Text Editor tab.",
+      "Trip to Paris written to sheet Trip to Paris and saved in the text editor.",
+    ]);
+  });
+
+  it("gives the editor's tools longer to load than the default wait, on the editor's origin", async () => {
+    const demos = fakeDemos();
+    await runMacro(tripPlanMacro, demos.host, { inputs });
+
+    expect(demos.waits).toContainEqual({ name: "create_document", timeoutMs: 30_000 });
+    expect(tripPlanMacro.sites.editor?.startUrl).toBe("https://bandarra.me/apps/webmcp-text-editor/");
+  });
+
+  it("waits for the approval however long it takes", async () => {
+    vi.useFakeTimers();
+    try {
+      let approve = (_approved: boolean): void => {};
+      const demos = fakeDemos({ approval: new Promise((resolve) => (approve = resolve)) });
+      const run = runMacro(tripPlanMacro, demos.host, { inputs, toolTimeoutMs: 1000 });
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(demos.calls.at(-1)).toBe("editor:create_document");
+      approve(true);
+
+      await expect(run).resolves.toMatchObject({ status: "done" });
+      expect(demos.documents).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("finishes the run, without the summary, when the user declines it", async () => {
+    const demos = fakeDemos({ approval: Promise.resolve(false) });
+    const result = await runMacro(tripPlanMacro, demos.host, { inputs });
+
+    expect(result.status).toBe("done");
+    expect(demos.documents).toEqual([]);
+    expect(demos.messages.at(-1)).toBe("Trip to Paris written to sheet Trip to Paris; the summary was not saved.");
+  });
+
+  it("fails the run on any other error from the editor", async () => {
+    const demos = fakeDemos();
+    const host: ToolHost = {
+      ...demos.host,
+      async callTool(name, args, site) {
+        if (name === "create_document") return { error: "The editor is still loading.", code: "NOT_READY" };
+        return demos.host.callTool(name, args, site);
+      },
+    };
+    const result = await runMacro(tripPlanMacro, host, { inputs });
+
+    expect(result).toMatchObject({ status: "failed", message: "The editor is still loading." });
   });
 });

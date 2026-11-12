@@ -1,4 +1,5 @@
 import { MACRO_VERSION, type BinaryOp, type Expr, type Json, type Macro, type Stmt } from "../macro/types";
+import { EDITOR_SITE, editorSite, editorTools, saveSummary } from "./saveSummary";
 
 const lit = (value: Json): Expr => ({ lit: value });
 const v = (name: string): Expr => ({ var: name });
@@ -26,7 +27,8 @@ const PICKS = 3;
 /**
  * Plans a trip across three GoogleChromeLabs demos on one origin (spec §12,
  * macro 3): flights on the run's tab, then a new sheet, then hotels, then the
- * sheet again, with values crossing sites only through variables.
+ * sheet again, with values crossing sites only through variables. Last, a
+ * summary goes into the text editor on a second origin (macro 6).
  *
  * Macros have no date arithmetic, so the nights between the two dates come
  * from the sheet itself: the trip row holds `=DAYS(...)`, and `set_values`
@@ -39,7 +41,8 @@ export const tripPlanMacro: Macro = {
   wmm: MACRO_VERSION,
   id: "sample-trip-plan",
   name: "Plan a trip",
-  description: "Finds the cheapest flights and hotels for one set of dates and writes them into a new sheet.",
+  description:
+    "Finds the cheapest flights and hotels for one set of dates, writes them into a new sheet and saves a summary in the text editor.",
   sites: {
     flights: {
       match: ["https://googlechromelabs.github.io/webmcp-tools/demos/react-flightsearch/*"],
@@ -53,6 +56,7 @@ export const tripPlanMacro: Macro = {
       match: ["https://googlechromelabs.github.io/webmcp-tools/demos/spreadsheet/*"],
       startUrl: "https://googlechromelabs.github.io/webmcp-tools/demos/spreadsheet/",
     },
+    [EDITOR_SITE]: editorSite,
   },
   tools: {
     searchFlights: { site: "flights", name: "searchFlights" },
@@ -62,6 +66,7 @@ export const tripPlanMacro: Macro = {
     listHotels: { site: "hotels", name: "get_hotel_search_results" },
     addSheet: { site: "sheet", name: "add_sheet" },
     setValues: { site: "sheet", name: "set_values" },
+    ...editorTools,
   },
   trigger: { site: "flights", anyOf: [["searchFlights"]] },
   inputs: [
@@ -213,9 +218,52 @@ export const tripPlanMacro: Macro = {
       { op: "call", tool: "setValues", args: { range: str(v("sheetRef"), lit("A4")), values: v("rows") }, saveAs: "written" },
       failOnError("written"),
     ]),
+
+    // The summary is Markdown, built from the same picks as the sheet.
+    set(
+      "summary",
+      str(
+        lit("# Trip to "), input("city"), lit("\n\n"),
+        input("checkIn"), lit(" to "), input("checkOut"), lit(", "), v("nights"), lit(" nights for "), input("travellers"),
+        lit(". Details are in sheet "), get(v("added"), "name"), lit(".\n\n## Cheapest flights\n\n"),
+      ),
+    ),
     {
-      op: "message",
-      text: str(lit("Trip to "), input("city"), lit(" written to sheet "), get(v("added"), "name"), lit(".")),
+      op: "forEach",
+      list: v("flights"),
+      var: "f",
+      body: [
+        set(
+          "summary",
+          str(
+            v("summary"), lit("- "), get(v("f"), "airline"), lit(", "), get(v("f"), "origin"), lit(" to "),
+            get(v("f"), "destination"), lit(" at "), get(v("f"), "departureTime"), lit(", stops: "), get(v("f"), "stops"),
+            lit(", $"), get(v("f"), "price"), lit("\n"),
+          ),
+        ),
+      ],
     },
+    set("summary", str(v("summary"), lit("\n## Cheapest hotels\n\n"))),
+    {
+      op: "forEach",
+      list: v("hotels"),
+      var: "h",
+      body: [
+        set(
+          "summary",
+          str(
+            v("summary"), lit("- "), get(v("h"), "name"), lit(", rated "), get(v("h"), "rating"), lit(": $"),
+            get(v("h"), "price"), lit(" a night, $"), bin("*", get(v("h"), "price"), v("nights")), lit(" in all\n"),
+          ),
+        ),
+      ],
+    },
+    ...saveSummary(str(lit("Trip to "), input("city")), v("summary"), "savedSummary"),
+    set("outcome", str(lit("Trip to "), input("city"), lit(" written to sheet "), get(v("added"), "name"))),
+    when(
+      bin("==", get(v("savedSummary"), "error"), lit(null)),
+      [{ op: "message", text: str(v("outcome"), lit(" and saved in the text editor.")) }],
+      [{ op: "message", text: str(v("outcome"), lit("; the summary was not saved.")) }],
+    ),
   ],
 };

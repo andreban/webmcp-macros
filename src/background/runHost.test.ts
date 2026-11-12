@@ -268,6 +268,27 @@ describe("runs", () => {
     expect(events.at(-1)).toMatchObject({ type: "run-finished", result: { status: "failed" } });
   });
 
+  it("keeps a run going while a call waits on the page, for as long as it takes", async () => {
+    // A tool that pauses for on-page approval: only the wait for the tool has a time limit.
+    vi.useFakeTimers();
+    try {
+      let approve = (): void => {};
+      const { host, tools, events, requests } = setup([macro([{ op: "call", tool: "go" }])], () => {
+        return new Promise((resolve) => (approve = () => resolve({ ok: true, result: { created: true } })));
+      });
+      tools.push("go");
+      const run = host.startRun(TAB, "m", {});
+      await vi.waitFor(() => expect(requests.some((request) => request.type === "execute-tool")).toBe(true));
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(events.some((event) => event.type === "run-finished")).toBe(false);
+      approve();
+      await run;
+      expect(events.at(-1)).toMatchObject({ type: "run-finished", result: { status: "done", toolCalls: 1 } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a closed tab aborts its run and forgets its tools", async () => {
     const { host, events, requests, sendToTab } = setup([macro([{ op: "waitForTool", tool: "go", timeoutMs: 60_000 }])]);
     host.setTools(TAB, [{ name: "other" }]);
