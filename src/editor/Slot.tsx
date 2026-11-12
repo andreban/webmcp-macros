@@ -1,8 +1,8 @@
 import { type Dispatch, Fragment, type ReactNode, useContext, useId, useRef, useState } from "react";
-import type { BinaryOp, Expr, Macro, MacroTool, Stmt } from "../macro/types";
+import type { BinaryOp, Expr, Json, Macro, MacroTool, Stmt } from "../macro/types";
 import { ExprPicker, formatLiteral, type LiteralType, parseLiteral, variableNames } from "./ExprPicker";
 import { type Slot as SlotDef, type SlotValue, type SlotValues, expressions, exprKind, readSlot } from "./registry";
-import { type ArgSlot, literalType, missingArgs, newArg, requiredArgs, schemaSlots, toolArgSlots } from "./schemaSlots";
+import { type ArgSlot, argOptions, type EnumOption, literalType, missingArgs, newArg, requiredArgs, schemaSlots, toolArgSlots } from "./schemaSlots";
 import { type EditorAction, isOptionalSlot, type Path } from "./state";
 import { PageToolsContext, toolEntry } from "./ToolPalette";
 
@@ -17,6 +17,8 @@ export interface SlotProps {
   label: string;
   /** What a literal typed here must be. Nested slots accept any value. */
   type?: LiteralType;
+  /** The values a literal here is picked from, as a dropdown: an enum's options. */
+  options?: readonly EnumOption[];
   /** The slot may be empty: it offers to add a value, and the picker to remove it. */
   optional?: boolean;
 }
@@ -26,7 +28,7 @@ export interface SlotProps {
  * expressions are nested slots. Its button (Enter or click) opens the picker
  * that replaces the whole expression.
  */
-export function Slot({ macro, path, expr, dispatch, label, type = "any", optional = false }: SlotProps) {
+export function Slot({ macro, path, expr, dispatch, label, type = "any", options, optional = false }: SlotProps) {
   const [picking, setPicking] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const close = () => {
@@ -35,7 +37,7 @@ export function Slot({ macro, path, expr, dispatch, label, type = "any", optiona
   };
   return (
     <span className="wmm-slot">
-      {expr ? <ExprEditor macro={macro} path={path} expr={expr} dispatch={dispatch} type={type} /> : null}
+      {expr ? <ExprEditor macro={macro} path={path} expr={expr} dispatch={dispatch} type={type} options={options} /> : null}
       <button
         ref={button}
         type="button"
@@ -69,10 +71,11 @@ interface EditorProps {
   expr: Expr;
   dispatch: Dispatch<EditorAction>;
   type: LiteralType;
+  options?: readonly EnumOption[] | undefined;
 }
 
 /** Renders the expression's registry label, with a control for each of its slots. */
-function ExprEditor({ macro, path, expr, dispatch, type }: EditorProps) {
+function ExprEditor({ macro, path, expr, dispatch, type, options }: EditorProps) {
   const { label, bare } = expressions[exprKind(expr)];
   // Only a tool call's arguments have a schema; `obj` and `callProc` share the slot type.
   const schema = "call" in expr ? toolArgSlots(macro, expr.call) : undefined;
@@ -88,7 +91,7 @@ function ExprEditor({ macro, path, expr, dispatch, type }: EditorProps) {
     const at = [...path, part.slot];
     return (
       <Fragment key={index}>
-        <Field macro={macro} path={at} slot={slot} dispatch={dispatch} type={type} update={update} schema={schema} />
+        <Field macro={macro} path={at} slot={slot} dispatch={dispatch} type={type} options={options} update={update} schema={schema} />
       </Fragment>
     );
   });
@@ -111,16 +114,26 @@ interface FieldProps extends Omit<EditorProps, "expr"> {
   schema?: readonly ArgSlot[];
 }
 
-function Field({ macro, path, slot, dispatch, type, update, schema }: FieldProps) {
+function Field({ macro, path, slot, dispatch, type, options, update, schema }: FieldProps) {
   const listId = useId();
-  const nested = (expr: Expr, at: Path, label: string, literal?: LiteralType) => (
-    <Slot macro={macro} path={at} expr={expr} dispatch={dispatch} label={label} type={literal} />
+  const nested = (expr: Expr, at: Path, label: string, known?: ArgSlot) => (
+    <Slot
+      macro={macro}
+      path={at}
+      expr={expr}
+      dispatch={dispatch}
+      label={label}
+      type={known && literalType(known.kind)}
+      options={known && argOptions(known.kind)}
+    />
   );
   switch (slot.type) {
     case "value":
       return nested(slot.value, path, "value");
     case "literal":
-      return (
+      return options ? (
+        <OptionChoose value={slot.value} options={options} onChange={update} />
+      ) : (
         <DraftField
           label="value"
           value={formatLiteral(slot.value, type)}
@@ -168,7 +181,7 @@ function Field({ macro, path, slot, dispatch, type, update, schema }: FieldProps
             return (
               <span key={key} className="wmm-arg" title={known?.description}>
                 {key}
-                {known?.required ? <abbr title="required">*</abbr> : null}: {nested(value, [...path, key], key, known && literalType(known.kind))}
+                {known?.required ? <abbr title="required">*</abbr> : null}: {nested(value, [...path, key], key, known)}
                 <button type="button" aria-label={`Remove ${key}`} onClick={() => update(Object.fromEntries(Object.entries(records).filter(([other]) => other !== key)))}>
                   ×
                 </button>
@@ -352,6 +365,26 @@ function ToolChoose({ macro, value, onChange }: { macro: Macro; value: string; o
           {page ? "This page registers no tools" : "No page to read tools from"}
         </option>
       ) : null}
+    </select>
+  );
+}
+
+/**
+ * A literal picked from a schema's options. A value outside them, from an
+ * older schema or a hand edit, stays listed so the select never shows a
+ * value other than the one in the macro.
+ */
+function OptionChoose({ value, options, onChange }: { value: Json; options: readonly EnumOption[]; onChange: (value: Json) => void }) {
+  const known = options.some((option) => option === value);
+  const shown: readonly Json[] = known ? options : [value, ...options];
+  return (
+    <select aria-label="value" value={JSON.stringify(value)} onChange={(event) => onChange(shown.find((option) => JSON.stringify(option) === event.target.value) ?? null)}>
+      {shown.map((option) => (
+        <option key={JSON.stringify(option)} value={JSON.stringify(option)}>
+          {typeof option === "string" ? option : JSON.stringify(option)}
+          {known || option !== value ? "" : " (not an option)"}
+        </option>
+      ))}
     </select>
   );
 }
