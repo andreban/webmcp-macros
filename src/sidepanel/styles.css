@@ -52,3 +52,7 @@ details > summary { cursor: pointer; }
 .wmm-actions { display: flex; justify-content: flex-end; gap: 6px; }
 button.wmm-secondary { background: transparent; color: var(--fg); border-color: var(--border); }
 .wmm-error { color: var(--danger); margin: 0; }
+.macro-card { display: flex; align-items: flex-start; gap: 8px; }
+.macro-card > details { flex: 1; min-width: 0; }
+.macro-card > details > summary { font-weight: 600; cursor: pointer; }
+.card.row > span { margin-right: auto; }

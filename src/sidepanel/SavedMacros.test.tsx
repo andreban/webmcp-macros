@@ -17,7 +17,9 @@ describe("SavedMacros", () => {
     expect(html.match(/class="wmm-program"/g)).toHaveLength(sampleMacros.length);
     expect(html.match(/<button type="button"[^>]*>Copy share string<\/button>/g)).toHaveLength(sampleMacros.length);
     expect(html.match(/<button type="button"[^>]*>Delete<\/button>/g)).toHaveLength(sampleMacros.length);
-    expect(html.match(/<button type="button"[^>]*>Edit<\/button>/g)).toHaveLength(sampleMacros.length);
+    // Edit is outside the folded part, so it shows without opening the card.
+    const edits = [...html.matchAll(/<\/details><button type="button"[^>]*aria-label="Edit ([^"]*)">Edit<\/button>/g)];
+    expect(edits.map((match) => match[1])).toEqual(sampleMacros.map((macro) => macro.name));
     expect(html.match(/<button type="button"[^>]*>New macro<\/button>/g)).toHaveLength(1);
     // The copy confirmation needs a live region that exists before it changes.
     expect(html.match(/role="status"/g)).toHaveLength(sampleMacros.length);

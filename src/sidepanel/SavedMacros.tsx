@@ -96,30 +96,31 @@ function MacroCard({ macro }: { macro: Macro }) {
   const remove = () =>
     deleteMacro(macro.id).catch(() => setNotice({ text: "Could not delete this macro", failed: true }));
 
+  const edit = () => void openEditor(macro.id).catch(() => setNotice({ text: "Could not open the editor", failed: true }));
+
+  // Edit sits beside the name rather than inside the folded card, where it was easy to miss.
   return (
-    <details className="card">
-      <summary>{macro.name}</summary>
-      {macro.description ? <p className="muted">{macro.description}</p> : null}
-      <ProgramView macro={macro} />
-      <div className="actions">
-        {/* Always rendered so screen readers announce the text when it changes. */}
-        <span role="status" className={notice?.failed ? "status failed" : "status"}>
-          {notice?.text ?? ""}
-        </span>
-        <button type="button" className="secondary" onClick={() => void remove()}>
-          Delete
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => void openEditor(macro.id).catch(() => setNotice({ text: "Could not open the editor", failed: true }))}
-        >
-          Edit
-        </button>
-        <button type="button" onClick={() => void share()}>
-          Copy share string
-        </button>
-      </div>
-    </details>
+    <div className="card macro-card">
+      <details>
+        <summary>{macro.name}</summary>
+        {macro.description ? <p className="muted">{macro.description}</p> : null}
+        <ProgramView macro={macro} />
+        <div className="actions">
+          {/* Always rendered so screen readers announce the text when it changes. */}
+          <span role="status" className={notice?.failed ? "status failed" : "status"}>
+            {notice?.text ?? ""}
+          </span>
+          <button type="button" className="secondary" onClick={() => void remove()}>
+            Delete
+          </button>
+          <button type="button" onClick={() => void share()}>
+            Copy share string
+          </button>
+        </div>
+      </details>
+      <button type="button" className="secondary" aria-label={`Edit ${macro.name}`} onClick={edit}>
+        Edit
+      </button>
+    </div>
   );
 }

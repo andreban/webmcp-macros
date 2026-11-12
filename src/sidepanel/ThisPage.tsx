@@ -66,7 +66,7 @@ export interface ThisPageViewProps {
   onRun(macro: Macro): void;
   onSubmit(macro: Macro, values: Record<string, Json>): void;
   onCancel(): void;
-  /** Opens a macro that no longer fits the page's tools in the editor. */
+  /** Opens a macro in the editor: to edit it, or because it no longer fits the page's tools. */
   onUpdate(macro: Macro): void;
   /** Opens the editor on a new macro for this page, so its tools are there to build with. */
   onNewMacro(): void;
@@ -118,6 +118,11 @@ export function ThisPageView(props: ThisPageViewProps) {
                       {macro.name}
                       {compat.status === "changed" ? <small className="muted"> (this site changed its tools)</small> : null}
                     </span>
+                    {compat.status === "incompatible" ? null : (
+                      <button type="button" className="secondary" aria-label={`Edit ${macro.name}`} onClick={() => onUpdate(macro)}>
+                        Edit
+                      </button>
+                    )}
                     {compat.status === "incompatible" ? (
                       <button type="button" className="secondary" onClick={() => onUpdate(macro)}>
                         Needs update
