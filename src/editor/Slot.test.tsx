@@ -56,7 +56,7 @@ describe("Slot", () => {
     expect(html).toMatch(/<option value="look" selected="">look_around<\/option>/);
     expect(html).toContain("dir: ");
     expect(html).toContain('aria-label="Remove dir"');
-    expect(html).toContain('aria-label="new field name"');
+    expect(html).toContain('aria-label="new argument name"');
   });
 
   it("offers the page's tools that the macro does not use yet, so a new macro can pick one", () => {
@@ -119,14 +119,15 @@ describe("Slot", () => {
     expect(html).toContain('<option value="trajectory">trajectory (required)</option>');
     expect(html).toContain('<option value="crew">crew</option>');
     expect(html).not.toContain('<option value="auth_code">');
-    expect(html).not.toContain('aria-label="new field name"'); // the schema's fields are offered instead
+    expect(html).not.toContain('aria-label="new argument name"'); // the schema's fields are offered instead
   });
 
   it("keeps free-form arguments without a schema, and for objects and procedures", () => {
     for (const expr of [{ call: "look", args: {} }, { obj: {} }, { callProc: "p", args: {} }] satisfies Expr[]) {
       const html = render(expr);
       expect(html).not.toContain('aria-label="add argument"');
-      expect(html).toContain('aria-label="new field name"');
+      // An object's entries are keys, a call's are arguments; the placeholder says which.
+      expect(html).toContain("obj" in expr ? 'placeholder="+ key"' : 'placeholder="+ argument"');
     }
   });
 
@@ -172,7 +173,7 @@ describe("StmtSlot", () => {
   it("edits leaf fields in place", () => {
     const html = renderStmt({ op: "call", tool: "look", saveAs: "seen" });
     expect(html).toMatch(/<option value="look" selected="">look_around<\/option>/);
-    expect(html).toContain('aria-label="new field name"'); // absent args edit as none
+    expect(html).toContain('aria-label="new argument name"'); // absent args edit as none
     expect(html).toMatch(/ as <input[^>]*aria-label="variable"[^>]* value="seen"/);
     expect(html).toContain('aria-label="Remove save result"');
     expect(renderStmt({ op: "wait", ms: 250 })).toMatch(/aria-label="milliseconds"[^>]* value="250"/);

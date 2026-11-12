@@ -187,6 +187,8 @@ function Field({ macro, path, slot, dispatch, type, options, update, schema, fie
       const records = slot.value;
       const add = (key: string) => update({ ...records, [key]: newArg(schema, key) });
       const missing = schema ? missingArgs(schema, records) : [];
+      // An object's entries are keys; a call's (to a tool without a saved schema, or a procedure) are arguments.
+      const noun = path.at(-1) === "obj" ? "key" : "argument";
       return (
         <span className="wmm-args">
           {Object.entries(records).map(([key, value]) => {
@@ -215,8 +217,9 @@ function Field({ macro, path, slot, dispatch, type, options, update, schema, fie
           {/* A tool's schema lists its arguments; a free-form name is only for objects and tools without one. */}
           {schema ? null : (
             <DraftField
-              label="new field name"
-              placeholder="+ field"
+              label={`new ${noun} name`}
+              placeholder={`+ ${noun}`}
+              title={`Type a name and press Enter to add ${noun === "key" ? "a key to this object" : "an argument"}`}
               value=""
               commit={(text) => {
                 const key = text.trim();
@@ -433,12 +436,14 @@ function DraftField({
   value,
   list,
   placeholder,
+  title,
   commit,
 }: {
   label: string;
   value: string;
   list?: string;
   placeholder?: string;
+  title?: string;
   commit: (text: string) => string | undefined | void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
@@ -460,6 +465,7 @@ function DraftField({
         aria-describedby={error ? errorId : undefined}
         value={text}
         placeholder={placeholder}
+        title={title}
         size={Math.max(3, text.length, placeholder?.length ?? 0)}
         list={list}
         onChange={(event) => setDraft(event.target.value)}
