@@ -19,8 +19,11 @@ const onSite = (site: string, body: Stmt[]): Stmt => ({ op: "onSite", site, body
 const failOnError = (name: string): Stmt =>
   when(bin("!=", get(v(name), "error"), lit(null)), [{ op: "fail", message: get(v(name), "error") }]);
 
-/** The cities the hotel demo has hotels in, with the IATA city code the flight demo knows. */
-const CITY_CODES = { "New York": "NYC", Paris: "PAR", Tokyo: "TYO" };
+/**
+ * The destinations, as the IATA city codes the flight demo takes, with the city
+ * name the hotel demo searches for. The traveller picks a code, as for "From".
+ */
+const CITY_NAMES = { NYC: "New York", PAR: "Paris", TYO: "Tokyo" };
 /** How many of the cheapest flights and hotels go into the sheet. */
 const PICKS = 3;
 
@@ -72,11 +75,11 @@ export const tripPlanMacro: Macro = {
   inputs: [
     { key: "origin", label: "From (IATA)", schema: { type: "string", pattern: "^[A-Z]{3}$" }, mode: "remember", default: "LON" },
     {
-      key: "city",
-      label: "Destination",
-      schema: { type: "string", enum: Object.keys(CITY_CODES) },
+      key: "destination",
+      label: "To (IATA)",
+      schema: { type: "string", enum: Object.keys(CITY_NAMES) },
       mode: "ask",
-      default: "Paris",
+      default: "PAR",
     },
     { key: "checkIn", label: "Arrive", schema: { type: "string", format: "date" }, mode: "ask", default: "today+14d" },
     { key: "checkOut", label: "Leave", schema: { type: "string", format: "date" }, mode: "ask", default: "today+21d" },
@@ -117,12 +120,13 @@ export const tripPlanMacro: Macro = {
     },
   },
   program: [
+    set("city", { getKey: lit(CITY_NAMES), key: input("destination") }),
     {
       op: "call",
       tool: "searchFlights",
       args: {
         origin: input("origin"),
-        destination: { getKey: lit(CITY_CODES), key: input("city") },
+        destination: input("destination"),
         tripType: lit("round-trip"),
         outboundDate: input("checkIn"),
         inboundDate: input("checkOut"),
@@ -139,7 +143,7 @@ export const tripPlanMacro: Macro = {
 
     onSite("sheet", [
       // add_sheet refuses a name in use, as on a second run; then take the next free name.
-      { op: "call", tool: "addSheet", args: { name: str(lit("Trip to "), input("city")) }, saveAs: "added" },
+      { op: "call", tool: "addSheet", args: { name: str(lit("Trip to "), v("city")) }, saveAs: "added" },
       when(bin("!=", get(v("added"), "error"), lit(null)), [{ op: "call", tool: "addSheet", saveAs: "added" }]),
       failOnError("added"),
       // A new sheet is not the one on screen, so every range names it.
@@ -152,7 +156,7 @@ export const tripPlanMacro: Macro = {
           values: {
             list: [
               row(lit("Trip to"), lit("Arrive"), lit("Leave"), lit("Nights")),
-              row(input("city"), input("checkIn"), input("checkOut"), lit("=DAYS(C2,B2)")),
+              row(v("city"), input("checkIn"), input("checkOut"), lit("=DAYS(C2,B2)")),
             ],
           },
         },
@@ -168,7 +172,7 @@ export const tripPlanMacro: Macro = {
       {
         op: "call",
         tool: "searchHotels",
-        args: { query: input("city"), checkin_date: input("checkIn"), nights: v("nights"), adults: input("travellers") },
+        args: { query: v("city"), checkin_date: input("checkIn"), nights: v("nights"), adults: input("travellers") },
       },
       // The results page registers its tools once the search has navigated to it.
       { op: "waitForTool", tool: "listHotels" },
@@ -223,7 +227,7 @@ export const tripPlanMacro: Macro = {
     set(
       "summary",
       str(
-        lit("# Trip to "), input("city"), lit("\n\n"),
+        lit("# Trip to "), v("city"), lit("\n\n"),
         input("checkIn"), lit(" to "), input("checkOut"), lit(", "), v("nights"), lit(" nights for "), input("travellers"),
         lit(". Details are in sheet "), get(v("added"), "name"), lit(".\n\n## Cheapest flights\n\n"),
       ),
@@ -258,8 +262,8 @@ export const tripPlanMacro: Macro = {
         ),
       ],
     },
-    ...saveSummary(str(lit("Trip to "), input("city")), v("summary"), "savedSummary"),
-    set("outcome", str(lit("Trip to "), input("city"), lit(" written to sheet "), get(v("added"), "name"))),
+    ...saveSummary(str(lit("Trip to "), v("city")), v("summary"), "savedSummary"),
+    set("outcome", str(lit("Trip to "), v("city"), lit(" written to sheet "), get(v("added"), "name"))),
     when(
       bin("==", get(v("savedSummary"), "error"), lit(null)),
       [{ op: "message", text: str(v("outcome"), lit(" and saved in the text editor.")) }],
