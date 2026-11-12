@@ -1,7 +1,7 @@
 import { type Dispatch, type KeyboardEvent, useEffect, useId, useState } from "react";
 import { siteMatches, triggerSatisfied } from "../macro/matcher";
 import type { Macro, MacroTrigger, ToolInfo } from "../macro/types";
-import type { ContentRequest } from "../messages";
+import { type BackgroundRequest, isFrameToolLists } from "../messages";
 import { defaultTrigger } from "./defaultTrigger";
 import type { EditorAction } from "./state";
 
@@ -40,10 +40,40 @@ export function triggerStatus(macro: Macro, page: TabPage | undefined): string {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** An iframe's tools, under the origin Chrome reported for the frame. */
+export interface PageFrame {
+  frameId: number;
+  origin: string;
+  tools: readonly ToolInfo[];
+}
+
 /** The tab with its tools as the page reports them, schemas included. */
 export interface LivePage {
   url: string;
+  /** The top frame's tools: the ones the trigger is matched against. */
   tools: readonly ToolInfo[];
+  /** Iframes that report tools, in frame id order. */
+  frames?: readonly PageFrame[];
+}
+
+/**
+ * `page` with one frame's report applied. An iframe without an origin is left
+ * out: a macro could not name it, and the background always knows the origin
+ * of a frame that reported.
+ */
+export function withFrameTools(page: LivePage, frameId: number, origin: string | undefined, value: unknown): LivePage {
+  const tools = toolInfos(value);
+  if (frameId === 0) return { ...page, tools };
+  const others = (page.frames ?? []).filter((frame) => frame.frameId !== frameId);
+  const frames = origin === undefined || tools.length === 0 ? others : [...others, { frameId, origin, tools }];
+  return { ...page, frames: frames.toSorted((a, b) => a.frameId - b.frameId) };
+}
+
+/** The page at `url` from the background's `list-frame-tools` reply; anything malformed lists no tools. */
+export function pageFromFrames(url: string, reply: unknown): LivePage {
+  const empty: LivePage = { url, tools: [] };
+  const lists = isFrameToolLists(reply) ? reply : [];
+  return lists.reduce((page, { frameId, origin, tools }) => withFrameTools(page, frameId, origin, tools), empty);
 }
 
 /**
@@ -61,7 +91,10 @@ export function toolInfos(value: unknown): ToolInfo[] {
   });
 }
 
-/** Follows the tab's URL and tools: content scripts broadcast `tools-changed` to extension pages too. */
+/**
+ * Follows the tab's URL and the tools of each of its frames: the background
+ * lists them all, and content scripts broadcast `tools-changed` to extension pages too.
+ */
 export function useTabPage(tabId: number | undefined): LivePage | undefined {
   const [page, setPage] = useState<LivePage>();
   useEffect(() => {
@@ -69,14 +102,14 @@ export function useTabPage(tabId: number | undefined): LivePage | undefined {
     let active = true;
     const refresh = async () => {
       const tab = await chrome.tabs.get(tabId).catch(() => undefined);
-      const request: ContentRequest = { type: "list-tools" };
-      const reply: unknown = await chrome.tabs.sendMessage(tabId, request).catch(() => []);
-      if (active) setPage(tab?.url === undefined ? undefined : { url: tab.url, tools: toolInfos(reply) });
+      const request: BackgroundRequest = { type: "list-frame-tools", tabId };
+      const reply: unknown = await chrome.runtime.sendMessage(request).catch(() => []);
+      if (active) setPage(tab?.url === undefined ? undefined : pageFromFrames(tab.url, reply));
     };
     const onMessage = (message: unknown, sender: chrome.runtime.MessageSender) => {
       if (sender.tab?.id !== tabId || !isRecord(message) || message.type !== "tools-changed") return;
-      const tools = toolInfos(message.tools);
-      setPage((current) => current && { ...current, tools });
+      const { frameId = 0, origin } = sender;
+      setPage((current) => current && withFrameTools(current, frameId, origin, message.tools));
     };
     const onUpdated = (updatedId: number, change: chrome.tabs.OnUpdatedInfo) => {
       if (updatedId === tabId && (change.url !== undefined || change.status === "complete")) void refresh();

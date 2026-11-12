@@ -388,4 +388,26 @@ describe("frames", () => {
     host.stopRun(TAB);
     expect(sent.filter(({ request }) => request.type === "abort-tool").map(({ frameId }) => frameId)).toEqual([0, IFRAME]);
   });
+
+  it("lists every frame's tools with its origin, top frame first, after polling", async () => {
+    const { host, frames } = framedSetup();
+    frames.set(0, ["top"]);
+    frames.set(IFRAME, ["inner"]);
+    frames.set(IFRAME + 1, ["gone"]);
+    host.setTools(TAB, [{ name: "gone" }], IFRAME + 1, "https://gone.test");
+    host.setTools(TAB, [{ name: "inner", description: "d" }], IFRAME, "https://inner.test");
+    frames.delete(IFRAME + 1);
+    await expect(host.listFrames(TAB)).resolves.toEqual([
+      { frameId: 0, tools: [{ name: "top" }] },
+      { frameId: IFRAME, origin: "https://inner.test", tools: [{ name: "inner" }] },
+    ]);
+  });
+
+  it("lists no frames while a navigated tab's new page has not reported", async () => {
+    const { host, frames, toolHost } = framedSetup(async () => ({ ok: true, result: null, navigated: true }));
+    frames.set(0, ["go"]);
+    host.setTools(TAB, [{ name: "go" }], 0);
+    await toolHost.callTool("go", {});
+    await expect(host.listFrames(TAB)).resolves.toEqual([]);
+  });
 });

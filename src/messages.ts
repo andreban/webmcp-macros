@@ -31,7 +31,20 @@ export type BackgroundRequest =
    * given inline, so the editor can run unsaved edits.
    */
   | ({ type: "run-macro"; inputs: Record<string, Json>; tabId?: number } & ({ macroId: string } | { macro: Macro }))
-  | { type: "stop-run"; tabId?: number };
+  | { type: "stop-run"; tabId?: number }
+  /** From an extension page: the tab's tools in every frame. The reply is a `FrameToolList[]`. */
+  | { type: "list-frame-tools"; tabId: number };
+
+/**
+ * One frame's tools as the background knows them, top frame (id 0) first.
+ * `origin` comes from Chrome, so the page cannot forge it; it is unknown for
+ * a frame that has only been polled.
+ */
+export interface FrameToolList {
+  frameId: number;
+  origin?: string;
+  tools: ToolInfo[];
+}
 
 /**
  * Background → the tab and every extension page, while a macro runs. A step
@@ -122,9 +135,28 @@ export function isBackgroundRequest(message: unknown): message is BackgroundRequ
       );
     case "stop-run":
       return isOptionalTabId(message.tabId);
+    case "list-frame-tools":
+      return Number.isInteger(message.tabId);
     default:
       return false;
   }
+}
+
+/**
+ * Narrows the reply to `list-frame-tools`. Tool fields other than the name
+ * still come from the page and are checked where they are used.
+ */
+export function isFrameToolLists(value: unknown): value is FrameToolList[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (frame) =>
+        isRecord(frame) &&
+        Number.isInteger(frame.frameId) &&
+        (frame.origin === undefined || typeof frame.origin === "string") &&
+        isToolList(frame.tools),
+    )
+  );
 }
 
 /** Narrows the content script's reply to `execute-tool`. */
