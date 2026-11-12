@@ -96,14 +96,7 @@ function toJson(result: unknown): Json {
   // Chrome 153 hands back the text "undefined" for a tool that returns
   // nothing. A tool returning that bare word as text reads as null too.
   if (result === undefined || result === null || result === "undefined") return null;
-  if (typeof result === "string") {
-    try {
-      // JSON.parse only produces JSON values.
-      return JSON.parse(result) as Json;
-    } catch {
-      return result;
-    }
-  }
+  if (typeof result === "string") return parseText(result);
   let text: string | undefined;
   try {
     text = JSON.stringify(result);
@@ -113,6 +106,40 @@ function toJson(result: unknown): Json {
   }
   // `undefined` for functions and symbols, which JSON cannot hold.
   return text === undefined ? null : (JSON.parse(text) as Json);
+}
+
+/** One text block of an MCP tool result. */
+function isTextBlock(block: Json): block is { type: "text"; text: string } {
+  return typeof block === "object" && block !== null && !Array.isArray(block) && block.type === "text" && typeof block.text === "string";
+}
+
+/** Parses `text` when it is JSON, else keeps it as text. */
+function parseText(text: string): Json {
+  try {
+    // JSON.parse only produces JSON values.
+    return JSON.parse(text) as Json;
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Pages built on MCP helpers, such as the `use-webmcp-tool` React hook, wrap
+ * every result as an MCP tool result: `{content: [{type: "text", text}]}`,
+ * with the value as JSON text and `isError: true` for a failure. Macros read
+ * the value itself, so it is unwrapped here: `structuredContent` when given,
+ * else the text blocks joined and parsed like any JSON text. An error result
+ * throws its text, as a failed call does. Results with non-text blocks, such
+ * as images, are left as they are.
+ */
+function unwrapMcpResult(value: Json): Json {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const { content, isError, structuredContent, ...rest } = value;
+  if (!Array.isArray(content) || Object.keys(rest).length > 0 || !content.every(isTextBlock)) return value;
+  const text = content.map((block) => block.text).join("\n");
+  if (isError === true) throw new Error(text || "The tool reported an error.");
+  if (structuredContent !== undefined) return structuredContent;
+  return content.length === 0 ? null : parseText(text);
 }
 
 /**
@@ -132,7 +159,7 @@ export async function executeTool(name: string, args: Record<string, Json>, sign
     if (!rejectedObjectInput(error)) throw error;
     result = await context.executeTool(tool, JSON.stringify(args), { signal });
   }
-  return toJson(result);
+  return unwrapMcpResult(toJson(result));
 }
 
 /**
