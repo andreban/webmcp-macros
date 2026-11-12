@@ -104,6 +104,9 @@ export interface PageTools {
 /** Provided by the program editor; without it, tool slots offer only the macro's own tools. */
 export const PageToolsContext = createContext<PageTools | undefined>(undefined);
 
+/** Shown wherever tools are missing because the editor was not opened from a page. */
+export const NO_TAB = "No page to read tools from. Open the page you want to automate and choose New macro for this page in the side panel.";
+
 const describeSlot = (slot: ArgSlot) => (slot.kind.type === "enum" ? `${slot.key}: ${slot.kind.options.join(" | ")}` : `${slot.key}: ${slot.kind.type}`);
 
 export interface ToolPaletteProps {
@@ -127,7 +130,7 @@ export function ToolPalette({ macro, page, onPick }: ToolPaletteProps) {
   return (
     <div className="tool-palette">
       <span>Insert tool call</span>
-      {tools.length === 0 ? <p className="muted">{page ? "This tab registers no tools." : "No tab to read tools from."}</p> : null}
+      {tools.length === 0 ? <p className="muted">{page ? "This tab registers no tools right now." : NO_TAB}</p> : null}
       {[...groups].map(([origin, group]) =>
         group.length === 0 ? null : (
           <Fragment key={origin ?? ""}>

@@ -158,6 +158,6 @@ describe("ToolPalette", () => {
 
   it("says when there is no tab", () => {
     const html = renderToStaticMarkup(<ToolPalette macro={createNewMacro(undefined, "m")} page={undefined} onPick={() => {}} />);
-    expect(html).toContain("No tab to read tools from.");
+    expect(html).toContain("No page to read tools from. Open the page you want to automate");
   });
 });
