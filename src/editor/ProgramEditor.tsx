@@ -139,6 +139,10 @@ export function ProgramEditor({
             removes it, and / jumps to the palette. Blocks can also be dragged.
           </p>
           <div ref={root} onKeyDown={onKeyDown} onFocus={onFocus} onBlur={onBlur}>
+            {/* Heads the program as Scratch's hat block does; it is not a statement, so it takes no focus. */}
+            <div className="wmm-hat" aria-hidden="true">
+              when run
+            </div>
             <Body view={view} body={macro.program} at={["program"]} />
           </div>
         </section>
