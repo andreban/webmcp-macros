@@ -4,7 +4,10 @@ import { MACRO_VERSION, isMacro, type Expr, type Json, type Macro } from "../mac
 import { ExprPicker, formatLiteral, type LiteralType, parseLiteral, pickerChoices, resultName, variableNames } from "./ExprPicker";
 import { observedSchemas } from "./resultFields";
 import { exprKind, expressions } from "./registry";
+import { createNewMacro } from "./page";
+import { type LivePage, toolInfos } from "./SitesPanel";
 import { createEditorState, editorReducer } from "./state";
+import { pageSite, paletteTools, toolCall } from "./ToolPalette";
 
 const macro: Macro = {
   wmm: MACRO_VERSION,
@@ -151,5 +154,22 @@ describe("ExprPicker", () => {
     expect(html).toMatch(/^<select[^>]*aria-label="Choose condition"[^>]*size="8"/);
     expect(html).toContain(">Input: Auth code</option>");
     expect(html).toContain(">Result of a tool</option>");
+  });
+});
+
+describe("a page tool's outputSchema, end to end", () => {
+  it("offers a saved result's list field to a for each inserted after the call", () => {
+    const wish = { type: "object", properties: { toy: { type: "string" }, colour: { type: "string" } } };
+    const outputSchema = { type: "object", properties: { child: { type: "string" }, wishes: { type: "array", items: wish } } };
+    const page: LivePage = { url: "https://example.com/santa", tools: toolInfos([{ name: "open_letter", inputSchema: { type: "object" }, outputSchema }]) };
+    let state = createEditorState(createNewMacro(page.url, "m"));
+    const site = pageSite(state.macro, page.url);
+    const [tool] = paletteTools(state.macro, page, site);
+    if (!tool) throw new Error("open_letter is not offered");
+    const { stmt, tools } = toolCall(state.macro, tool, site);
+    if (stmt.op !== "call") throw new Error("not a call");
+    state = editorReducer(state, { type: "insertStmt", at: ["program", 0], stmt: { ...stmt, saveAs: resultName(state.macro, stmt.tool) }, tools });
+    const labels = pickerChoices(state.macro, undefined, false).map((choice) => choice.label);
+    expect(labels).toContain("letter → wishes");
   });
 });
