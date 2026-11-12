@@ -130,6 +130,9 @@ export function newArg(slots: readonly ArgSlot[] | undefined, key: string): Expr
 }
 
 /** How a literal in a slot of this kind is typed and shown; enums and untyped slots take any value. */
+/** The values a literal of this kind is picked from, or undefined when it is typed in. */
+export const argOptions = (kind: ArgKind): EnumOption[] | undefined => (kind.type === "enum" ? kind.options : undefined);
+
 export function literalType(kind: ArgKind): LiteralType {
   switch (kind.type) {
     case "enum":

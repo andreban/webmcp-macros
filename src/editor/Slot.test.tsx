@@ -77,6 +77,20 @@ describe("Slot", () => {
     expect(html).toContain("This page registers no tools");
   });
 
+  it("picks enum arguments from a dropdown, keeping a value outside the options", () => {
+    const fly = { site: "app", name: "fly", inputSchema: {
+      type: "object",
+      properties: { to: { enum: ["Moon", "Mars"] }, crewed: { type: "boolean" }, note: { type: "string" } },
+    } };
+    const withSchema = { ...macro, tools: { ...macro.tools, fly } };
+    const html = render({ call: "fly", args: { to: { lit: "Mars" }, crewed: { lit: true }, note: { lit: "hi" } } }, { macro: withSchema });
+    expect(html).toContain('<select aria-label="value"><option value="&quot;Moon&quot;">Moon</option><option value="&quot;Mars&quot;" selected="">Mars</option></select>');
+    expect(html).toMatch(/aria-label="value"[^>]* value="true"/); // a boolean is still typed in
+    expect(html).toMatch(/aria-label="value"[^>]* value="hi"/); // a string is still typed in
+    const odd = render({ call: "fly", args: { to: { lit: "Pluto" } } }, { macro: withSchema });
+    expect(odd).toContain('<option value="&quot;Pluto&quot;" selected="">Pluto (not an option)</option><option value="&quot;Moon&quot;">Moon</option>');
+  });
+
   it("suggests a call's arguments from the tool's saved schema", () => {
     const launch = { site: "app", name: "prepare_launch", inputSchema: {
       type: "object",
