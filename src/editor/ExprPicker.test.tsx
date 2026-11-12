@@ -99,6 +99,21 @@ describe("pickerChoices", () => {
     expect(pickerChoices(macro, literal, false).find((choice) => choice.label === "Typed value")?.expr).toBe(literal);
   });
 
+  it("offers each declared field of a saved result as one pick", () => {
+    const outputSchema = {
+      type: "object",
+      properties: { child: { type: "string" }, from: { type: "object", properties: { town: { type: "string" } } } },
+    };
+    const withSchema: Macro = { ...macro, tools: { look: { site: "app", name: "look_around", outputSchema } } };
+    const fields = pickerChoices(withSchema, undefined, false).filter((choice) => choice.label.startsWith("view → "));
+    expect(fields).toEqual([
+      { label: "view → child", expr: { get: { var: "view" }, path: ["child"] } },
+      { label: "view → from", expr: { get: { var: "view" }, path: ["from"] } },
+      { label: "view → from.town", expr: { get: { var: "view" }, path: ["from", "town"] } },
+    ]);
+    expect(pickerChoices(macro, undefined, false).some((choice) => choice.label.includes("→"))).toBe(false);
+  });
+
   it("offers to clear only an optional slot that holds a value", () => {
     const clears = (current: Expr | undefined, optional: boolean) =>
       pickerChoices(macro, current, optional).some((choice) => choice.expr === null);
