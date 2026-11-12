@@ -14,6 +14,8 @@ interface PageTool {
   description?: string;
   /** Some Chrome versions report the schema as JSON text. */
   inputSchema?: JsonSchema | string;
+  /** Absent before Chrome reports it, and on most tools; parsed like `inputSchema`. */
+  outputSchema?: JsonSchema | string;
   annotations?: Record<string, unknown>;
   /** The window that registered the tool; iframes' tools are listed too. */
   window?: Window;
@@ -65,12 +67,17 @@ function booleanAnnotations(annotations: PageTool["annotations"]): Record<string
 export async function listTools(): Promise<ToolInfo[]> {
   const context = modelContext();
   if (!context) return [];
-  return (await pageTools(context)).map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    inputSchema: parseSchema(tool.inputSchema),
-    annotations: booleanAnnotations(tool.annotations),
-  }));
+  return (await pageTools(context)).map((tool) => {
+    const info: ToolInfo = {
+      name: tool.name,
+      description: tool.description,
+      inputSchema: parseSchema(tool.inputSchema),
+      annotations: booleanAnnotations(tool.annotations),
+    };
+    const outputSchema = parseSchema(tool.outputSchema);
+    if (outputSchema) info.outputSchema = outputSchema;
+    return info;
+  });
 }
 
 /** The named tool is not registered by this document right now. */

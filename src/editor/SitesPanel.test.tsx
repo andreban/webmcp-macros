@@ -54,8 +54,16 @@ describe("toolInfos", () => {
         "b",
         { name: "c", description: "x", inputSchema: schema, extra: true },
         { name: "d", description: 2, inputSchema: [] },
+        { name: "e", outputSchema: schema },
+        { name: "f", outputSchema: "text" },
       ]),
-    ).toEqual([{ name: "a" }, { name: "c", description: "x", inputSchema: schema }, { name: "d" }]);
+    ).toEqual([
+      { name: "a" },
+      { name: "c", description: "x", inputSchema: schema },
+      { name: "d" },
+      { name: "e", outputSchema: schema },
+      { name: "f" },
+    ]);
     expect(toolInfos({ name: "a" })).toEqual([]);
   });
 });

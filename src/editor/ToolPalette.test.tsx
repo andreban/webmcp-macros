@@ -41,9 +41,15 @@ describe("paletteTools", () => {
     expect(paletteTools(rocketLauncherMacro, page, "other")).toHaveLength(2);
   });
 
-  it("keeps a snapshot schema for a tool that is not on the page", () => {
-    const macro: Macro = { ...rocketLauncherMacro, tools: { fuel: { site: "rocket", name: "load_fuel", inputSchema: fuelSchema } } };
-    expect(paletteTools(macro, undefined, "rocket")).toEqual([{ name: "load_fuel", inputSchema: fuelSchema, live: false }]);
+  it("keeps snapshot schemas for a tool that is not on the page", () => {
+    const outputSchema = { type: "object", properties: { status: { type: "string" } } };
+    const macro: Macro = {
+      ...rocketLauncherMacro,
+      tools: { fuel: { site: "rocket", name: "load_fuel", inputSchema: fuelSchema, outputSchema } },
+    };
+    expect(paletteTools(macro, undefined, "rocket")).toEqual([
+      { name: "load_fuel", inputSchema: fuelSchema, outputSchema, live: false },
+    ]);
   });
 });
 
@@ -138,6 +144,20 @@ describe("toolCall", () => {
     expect(next.macro.program).toEqual([fuel.stmt]);
     expect(next.macro.tools).toEqual(fuel.tools);
     expect(editorReducer(next, { type: "undo" }).macro).toBe(macro);
+  });
+
+  it("saves the outputSchema without hashing it, and keeps the last one seen", () => {
+    const outputSchema = { type: "object", properties: { status: { type: "string" } } };
+    const fuel = toolCall(macro, { name: "load_fuel", inputSchema: fuelSchema, outputSchema, live: true }, "main");
+    expect(fuel.tools.load_fuel).toEqual({
+      site: "main",
+      name: "load_fuel",
+      inputSchema: fuelSchema,
+      schemaHash: schemaHash(fuelSchema),
+      outputSchema,
+    });
+    const saved: Macro = { ...macro, tools: fuel.tools };
+    expect(toolCall(saved, { name: "load_fuel", live: true }, "main").tools.load_fuel?.outputSchema).toBe(outputSchema);
   });
 
   it("refreshes a stale hash from the page's schema", () => {

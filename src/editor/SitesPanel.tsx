@@ -87,6 +87,7 @@ export function toolInfos(value: unknown): ToolInfo[] {
     const info: ToolInfo = { name: tool.name };
     if (typeof tool.description === "string") info.description = tool.description;
     if (isRecord(tool.inputSchema)) info.inputSchema = tool.inputSchema;
+    if (isRecord(tool.outputSchema)) info.outputSchema = tool.outputSchema;
     return [info];
   });
 }

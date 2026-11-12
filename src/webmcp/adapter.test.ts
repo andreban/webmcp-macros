@@ -6,6 +6,7 @@ interface FakeTool {
   name: string;
   description?: string;
   inputSchema?: unknown;
+  outputSchema?: unknown;
   annotations?: Record<string, unknown>;
   window?: object;
 }
@@ -73,6 +74,18 @@ describe("listTools", () => {
       undefined,
       undefined,
     ]);
+  });
+
+  it("reports an outputSchema only when the tool declares a well-formed one", async () => {
+    context.tools = [
+      { name: "object", outputSchema: { type: "object" } },
+      { name: "text", outputSchema: '{"type":"string"}' },
+      { name: "broken", outputSchema: "{" },
+      { name: "none" },
+    ];
+    const tools = await listTools();
+    expect(tools.map((tool) => tool.outputSchema)).toEqual([{ type: "object" }, { type: "string" }, undefined, undefined]);
+    expect(tools.filter((tool) => "outputSchema" in tool).map((tool) => tool.name)).toEqual(["object", "text"]);
   });
 
   it("keeps only boolean annotations", async () => {
