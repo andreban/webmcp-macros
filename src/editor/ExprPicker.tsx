@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Expr, Json, Macro, Stmt } from "../macro/types";
 import { createDefaultExpr, type ExprKind, type ExprOf } from "./registry";
+import { resultFields } from "./resultFields";
 
 /** What a literal typed into a slot must be. Tool schemas map onto it: `array` is "list". */
 export type LiteralType = "any" | "text" | "number" | "boolean" | "list" | "object";
@@ -91,7 +92,16 @@ const CHOICES: { [K in ExprKind]: (ctx: Context) => { label: string; expr: ExprO
     ...variableNames(macro.program).map((name) => ({ label: `Variable: ${name}`, expr: { var: name } })),
     { label: "Other variable", expr: createDefaultExpr("var") },
   ],
-  get: ({ inner }) => [{ label: "Field of this value", expr: { get: inner, path: [] } }],
+  get: ({ macro, inner }) => [
+    { label: "Field of this value", expr: { get: inner, path: [] } },
+    // A saved tool result's declared fields, one pick each, so chaining needs no wrapping step.
+    ...variableNames(macro.program).flatMap((name) =>
+      resultFields(macro, { var: name }).map((field) => ({
+        label: `${name} → ${field}`,
+        expr: { get: { var: name }, path: field.split(".") },
+      })),
+    ),
+  ],
   bin: ({ inner }) => [{ label: "Compare or calculate", expr: { ...createDefaultExpr("bin"), left: inner } }],
   not: ({ inner }) => [{ label: "Not this value", expr: { not: inner } }],
   obj: () => [{ label: "Object", expr: createDefaultExpr("obj") }],
