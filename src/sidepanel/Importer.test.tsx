@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { encodeMacro } from "../macro/codec";
 import type { Macro } from "../macro/types";
 import { flightSearchMacro, rocketLauncherMacro } from "../samples";
+import { flightSearchPage } from "../samples/flightSearch";
 import { Importer, reviewImport, summarizeImport } from "./Importer";
 
 describe("reviewImport", () => {
@@ -12,7 +13,7 @@ describe("reviewImport", () => {
       ok: true,
       summary: {
         macro: flightSearchMacro,
-        sitePatterns: ["https://googlechromelabs.github.io/webmcp-tools/demos/react-flightsearch/*"],
+        sitePatterns: flightSearchPage.match,
         toolNames: ["listFlights", "resetFilters", "searchFlights", "setFilters"],
         replaces: null,
       },

@@ -1,4 +1,5 @@
 import { MACRO_VERSION, type BinaryOp, type Expr, type Json, type Macro, type Stmt } from "../macro/types";
+import { flightSearchPage } from "./flightSearch";
 import { EDITOR_SITE, editorSite, editorTools, saveSummary } from "./saveSummary";
 
 const lit = (value: Json): Expr => ({ lit: value });
@@ -47,10 +48,7 @@ export const tripPlanMacro: Macro = {
   description:
     "Finds the cheapest flights and hotels for one set of dates, writes them into a new sheet and saves a summary in the text editor.",
   sites: {
-    flights: {
-      match: ["https://googlechromelabs.github.io/webmcp-tools/demos/react-flightsearch/*"],
-      startUrl: "https://googlechromelabs.github.io/webmcp-tools/demos/react-flightsearch/",
-    },
+    flights: flightSearchPage,
     hotels: {
       match: ["https://googlechromelabs.github.io/webmcp-tools/demos/hotel-chain/*"],
       startUrl: "https://googlechromelabs.github.io/webmcp-tools/demos/hotel-chain/",

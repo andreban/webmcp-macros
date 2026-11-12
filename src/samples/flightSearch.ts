@@ -1,4 +1,19 @@
-import { MACRO_VERSION, type Macro } from "../macro/types";
+import { MACRO_VERSION, type Macro, type MacroSite } from "../macro/types";
+
+const FLIGHT_DEMO = "https://googlechromelabs.github.io/webmcp-tools/demos/react-flightsearch/";
+
+/**
+ * The flight demo's search page only. The demo uses a hash router, and its
+ * results page (`#/results?...`) registers `searchFlights` too, but that copy
+ * never reports completion, so the call fails after five seconds with "Timed
+ * out waiting for UI to update". Macros that start with a search are only
+ * offered where the search answers. Once a run has the tab, it keeps it
+ * whatever the URL (spec §11), so the search can navigate to the results.
+ */
+export const flightSearchPage: MacroSite = {
+  match: [FLIGHT_DEMO, `${FLIGHT_DEMO}#/`, `${FLIGHT_DEMO}index.html`, `${FLIGHT_DEMO}index.html#/`],
+  startUrl: FLIGHT_DEMO,
+};
 
 /**
  * Searches on the GoogleChromeLabs flight demo, then applies preferred filters
@@ -14,10 +29,7 @@ export const flightSearchMacro: Macro = {
   name: "Search my usual flight",
   description: "Searches, then filters by preferred stops and maximum price.",
   sites: {
-    flights: {
-      match: ["https://googlechromelabs.github.io/webmcp-tools/demos/react-flightsearch/*"],
-      startUrl: "https://googlechromelabs.github.io/webmcp-tools/demos/react-flightsearch/",
-    },
+    flights: flightSearchPage,
   },
   tools: {
     search: { site: "flights", name: "searchFlights" },
