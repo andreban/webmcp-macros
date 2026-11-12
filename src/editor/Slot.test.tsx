@@ -45,6 +45,32 @@ describe("Slot", () => {
     expect(html).toContain('aria-label="new field name"');
   });
 
+  it("suggests a call's arguments from the tool's saved schema", () => {
+    const launch = { site: "app", name: "prepare_launch", inputSchema: {
+      type: "object",
+      properties: { auth_code: { type: "string" }, trajectory: { enum: ["Moon", "Mars"] }, crew: { type: "integer" } },
+      required: ["auth_code", "trajectory"],
+    } };
+    const withSchema = { ...macro, tools: { ...macro.tools, launch } };
+    const html = render({ call: "launch", args: { auth_code: { lit: "x" }, legacy: { lit: 1 } } }, { macro: withSchema });
+    expect(html).toContain('auth_code<abbr title="required">*</abbr>: ');
+    expect(html).toMatch(/auth_code<abbr[^>]*>\*<\/abbr>: <span class="wmm-slot"><input[^>]* value="x"/); // a string edits unquoted
+    expect(html).toContain("legacy: "); // keys outside the schema stay editable
+    expect(html).toContain('aria-label="Remove legacy"');
+    expect(html).toContain('<option value="trajectory">trajectory (required)</option>');
+    expect(html).toContain('<option value="crew">crew</option>');
+    expect(html).not.toContain('<option value="auth_code">');
+    expect(html).toContain('aria-label="other field name"');
+  });
+
+  it("keeps free-form arguments without a schema, and for objects and procedures", () => {
+    for (const expr of [{ call: "look", args: {} }, { obj: {} }, { callProc: "p", args: {} }] satisfies Expr[]) {
+      const html = render(expr);
+      expect(html).not.toContain('aria-label="add argument"');
+      expect(html).toContain('aria-label="new field name"');
+    }
+  });
+
   it("asks to choose a tool the macro no longer has", () => {
     expect(render({ toolAvailable: "gone" })).toContain('<option value="" selected="">Choose tool</option>');
   });
@@ -91,6 +117,15 @@ describe("StmtSlot", () => {
     expect(html).toMatch(/ as <input[^>]*aria-label="variable"[^>]* value="seen"/);
     expect(html).toContain('aria-label="Remove result name"');
     expect(renderStmt({ op: "wait", ms: 250 })).toMatch(/aria-label="milliseconds"[^>]* value="250"/);
+  });
+
+  it("suggests a call statement's arguments from its tool's schema", () => {
+    const schema = { type: "object", properties: { dir: { type: "string" } }, required: ["dir"] };
+    const withSchema = { ...macro, tools: { look: { site: "app", name: "look_around", inputSchema: schema } } };
+    const html = renderToStaticMarkup(
+      <StmtSlot macro={withSchema} at={["program", 0]} stmt={{ op: "call", tool: "look" }} part={{ slot: "args", type: "args" }} dispatch={() => {}} renderBody={() => null} />,
+    );
+    expect(html).toContain('<option value="dir">dir (required)</option>');
   });
 
   it("offers to add an absent optional field, and only an optional one", () => {

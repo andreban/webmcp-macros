@@ -10,6 +10,7 @@ function render(overrides: Partial<WidgetViewProps> = {}): string {
   return renderToStaticMarkup(
     <WidgetView
       macros={[rocketLauncherMacro, flightSearchMacro]}
+      tools={[]}
       open={false}
       selected={null}
       run={null}
@@ -44,6 +45,21 @@ describe("WidgetView", () => {
     expect(html).toContain("Search my usual flight");
     expect(html.match(/<button type="button">Run<\/button>/g)).toHaveLength(2);
     expect(html).not.toContain('role="status"');
+  });
+
+  it("open: shows needs update instead of Run when the page's tools no longer fit", () => {
+    const tools = [{ name: "calculate_fuel", inputSchema: { type: "object", properties: { destination: { type: "string" } } } }];
+    const html = render({ open: true, tools });
+    expect(html).toContain('<span class="wmm-stale" title="This site&#x27;s tools changed. Update the macro in the editor.">Needs update</span>');
+    expect(html.match(/<button type="button">Run<\/button>/g)).toHaveLength(1);
+  });
+
+  it("open: warns when a recorded schema hash changed but the arguments still fit", () => {
+    const hashed = { ...rocketLauncherMacro, tools: { ...rocketLauncherMacro.tools, fuelPlan: { site: "rocket", name: "calculate_fuel", schemaHash: "00000000" } } };
+    const tools = [{ name: "calculate_fuel", inputSchema: { type: "object", properties: { trajectory: { type: "string" } } } }];
+    const html = render({ open: true, macros: [hashed], tools });
+    expect(html).toContain("<small>This site changed its tools since the macro was made.</small>");
+    expect(html).toContain('<button type="button">Run</button>');
   });
 
   it("input form: shows the selected macro instead of the list", () => {

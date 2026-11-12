@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { checkCompatibility } from "../macro/compat";
 import { matchingMacros } from "../macro/matcher";
 import type { Json, Macro, ToolInfo } from "../macro/types";
 import { InputForm } from "../ui/InputForm";
+import { openEditor } from "./SavedMacros";
 import { resultLine, useRun, type RunState } from "../ui/useRun";
 import { useActiveTab, type ActiveTab } from "./useActiveTab";
 
@@ -48,6 +50,7 @@ function TabSection({ tab, macros }: { tab: ActiveTab; macros: readonly Macro[] 
         start(macro, values);
       }}
       onCancel={() => setFormFor(null)}
+      onUpdate={(macro) => void openEditor(macro.id).catch(() => {})}
       onStop={stop}
       onDismiss={clear}
     />
@@ -62,12 +65,14 @@ export interface ThisPageViewProps {
   onRun(macro: Macro): void;
   onSubmit(macro: Macro, values: Record<string, Json>): void;
   onCancel(): void;
+  /** Opens a macro that no longer fits the page's tools in the editor. */
+  onUpdate(macro: Macro): void;
   onStop(): void;
   onDismiss(): void;
 }
 
 /** The section itself, with every piece of state passed in. */
-export function ThisPageView({ view, run, formMacro, onRun, onSubmit, onCancel, onStop, onDismiss }: ThisPageViewProps) {
+export function ThisPageView({ view, run, formMacro, onRun, onSubmit, onCancel, onUpdate, onStop, onDismiss }: ThisPageViewProps) {
   const running = run !== null && !run.result;
   return (
     <section aria-labelledby="page-heading">
@@ -101,14 +106,26 @@ export function ThisPageView({ view, run, formMacro, onRun, onSubmit, onCancel, 
             <p className="muted">No saved macro matches this page.</p>
           ) : (
             <ul className="cards">
-              {view.matches.map((macro) => (
-                <li key={macro.id} className="card row">
-                  <span>{macro.name}</span>
-                  <button type="button" onClick={() => onRun(macro)} disabled={running}>
-                    Run
-                  </button>
-                </li>
-              ))}
+              {view.matches.map((macro) => {
+                const compat = checkCompatibility(macro, view.tools);
+                return (
+                  <li key={macro.id} className="card row">
+                    <span>
+                      {macro.name}
+                      {compat.status === "changed" ? <small className="muted"> (this site changed its tools)</small> : null}
+                    </span>
+                    {compat.status === "incompatible" ? (
+                      <button type="button" className="secondary" onClick={() => onUpdate(macro)}>
+                        Needs update
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => onRun(macro)} disabled={running}>
+                        Run
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
           <details>

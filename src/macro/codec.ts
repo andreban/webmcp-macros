@@ -19,7 +19,7 @@ export class MacroDecodeError extends Error {
 }
 
 /** CRC-32 (IEEE), as lowercase hex padded to 8 digits. */
-function crc32Hex(bytes: Uint8Array): string {
+export function crc32Hex(bytes: Uint8Array): string {
   let crc = 0xffffffff;
   for (const byte of bytes) {
     crc ^= byte;
@@ -53,7 +53,7 @@ async function pipe(
  * macro always yields the same string whatever order the editor wrote its keys
  * in. Array order is meaningful and kept.
  */
-function canonical(value: unknown): unknown {
+export function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (typeof value === "object" && value !== null) {
     // Macros are plain JSON objects, so indexing by own keys is safe here.

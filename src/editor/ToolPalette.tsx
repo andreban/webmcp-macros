@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import { schemaHash } from "../macro/compat";
 import { siteMatches } from "../macro/matcher";
 import type { JsonSchema, Macro, MacroTool, Stmt } from "../macro/types";
 import { type ArgSlot, requiredArgs, schemaSlots } from "./schemaSlots";
@@ -70,7 +71,8 @@ export function aliasFor(name: string, taken: readonly string[]): string {
 /**
  * A call block for `tool` with its required arguments, and the `Macro.tools`
  * entry to merge: an alias already pointing at the tool is reused, and the
- * schema snapshot is refreshed from the page.
+ * schema snapshot and its hash are refreshed from the page, so a later change
+ * on the site can be detected.
  */
 export function toolCall(macro: Macro, tool: PaletteTool, site: string): { stmt: Stmt; tools: Record<string, MacroTool> } {
   const existing = Object.entries(macro.tools).find(
@@ -78,7 +80,10 @@ export function toolCall(macro: Macro, tool: PaletteTool, site: string): { stmt:
   );
   const alias = existing?.[0] ?? aliasFor(tool.name, Object.keys(macro.tools));
   const entry: MacroTool = { ...existing?.[1], site, name: tool.name };
-  if (tool.inputSchema) entry.inputSchema = tool.inputSchema;
+  if (tool.inputSchema) {
+    entry.inputSchema = tool.inputSchema;
+    entry.schemaHash = schemaHash(tool.inputSchema);
+  }
   if (tool.frameOrigin !== undefined) entry.frameOrigin = tool.frameOrigin;
   const args = requiredArgs(schemaSlots(tool.inputSchema));
   const stmt: Stmt = Object.keys(args).length > 0 ? { op: "call", tool: alias, args } : { op: "call", tool: alias };

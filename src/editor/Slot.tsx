@@ -2,6 +2,7 @@ import { type Dispatch, Fragment, type ReactNode, useId, useRef, useState } from
 import type { BinaryOp, Expr, Macro, Stmt } from "../macro/types";
 import { ExprPicker, formatLiteral, type LiteralType, parseLiteral, variableNames } from "./ExprPicker";
 import { type Slot as SlotDef, type SlotValue, type SlotValues, expressions, exprKind, readSlot } from "./registry";
+import { type ArgSlot, literalType, missingArgs, newArg, toolArgSlots } from "./schemaSlots";
 import { type EditorAction, isOptionalSlot, type Path } from "./state";
 
 export interface SlotProps {
@@ -72,6 +73,8 @@ interface EditorProps {
 /** Renders the expression's registry label, with a control for each of its slots. */
 function ExprEditor({ macro, path, expr, dispatch, type }: EditorProps) {
   const { label, bare } = expressions[exprKind(expr)];
+  // Only a tool call's arguments have a schema; `obj` and `callProc` share the slot type.
+  const schema = "call" in expr ? toolArgSlots(macro, expr.call) : undefined;
   const parts = label.map((part, index) => {
     // A label is fixed per kind, so the position is a stable key.
     if (typeof part === "string") return <Fragment key={index}>{part}</Fragment>;
@@ -84,7 +87,7 @@ function ExprEditor({ macro, path, expr, dispatch, type }: EditorProps) {
     const at = [...path, part.slot];
     return (
       <Fragment key={index}>
-        <Field macro={macro} path={at} slot={slot} dispatch={dispatch} type={type} update={update} />
+        <Field macro={macro} path={at} slot={slot} dispatch={dispatch} type={type} update={update} schema={schema} />
       </Fragment>
     );
   });
@@ -100,12 +103,14 @@ const isBinOp = (value: string): value is BinaryOp => Object.hasOwn(BIN_OPS, val
 interface FieldProps extends Omit<EditorProps, "expr"> {
   slot: SlotValue;
   update: (value: SlotValues[SlotDef["type"]]) => void;
+  /** For an `args` slot of a tool call: the tool's schema arguments, when the macro saved its schema. */
+  schema?: readonly ArgSlot[];
 }
 
-function Field({ macro, path, slot, dispatch, type, update }: FieldProps) {
+function Field({ macro, path, slot, dispatch, type, update, schema }: FieldProps) {
   const listId = useId();
-  const nested = (expr: Expr, at: Path, label: string) => (
-    <Slot macro={macro} path={at} expr={expr} dispatch={dispatch} label={label} />
+  const nested = (expr: Expr, at: Path, label: string, literal?: LiteralType) => (
+    <Slot macro={macro} path={at} expr={expr} dispatch={dispatch} label={label} type={literal} />
   );
   switch (slot.type) {
     case "value":
@@ -149,23 +154,40 @@ function Field({ macro, path, slot, dispatch, type, update }: FieldProps) {
       return <Choose label="operator" value={slot.value} options={Object.keys(BIN_OPS).map((op) => [op, op])} onChange={(op) => isBinOp(op) && update(op)} />;
     case "args": {
       const records = slot.value;
+      const add = (key: string) => update({ ...records, [key]: newArg(schema, key) });
+      const missing = schema ? missingArgs(schema, records) : [];
       return (
         <span className="wmm-args">
-          {Object.entries(records).map(([key, value]) => (
-            <span key={key} className="wmm-arg">
-              {key}: {nested(value, [...path, key], key)}
-              <button type="button" aria-label={`Remove ${key}`} onClick={() => update(Object.fromEntries(Object.entries(records).filter(([other]) => other !== key)))}>
-                ×
-              </button>
-            </span>
-          ))}
+          {Object.entries(records).map(([key, value]) => {
+            // A key outside the schema edits untyped, so an outdated argument can still be fixed.
+            const known = schema?.find((arg) => arg.key === key);
+            return (
+              <span key={key} className="wmm-arg" title={known?.description}>
+                {key}
+                {known?.required ? <abbr title="required">*</abbr> : null}: {nested(value, [...path, key], key, known && literalType(known.kind))}
+                <button type="button" aria-label={`Remove ${key}`} onClick={() => update(Object.fromEntries(Object.entries(records).filter(([other]) => other !== key)))}>
+                  ×
+                </button>
+              </span>
+            );
+          })}
+          {missing.length > 0 ? (
+            <select aria-label="add argument" value="" onChange={(event) => event.target.value && add(event.target.value)}>
+              <option value="">+ argument</option>
+              {missing.map((arg) => (
+                <option key={arg.key} value={arg.key} title={arg.description}>
+                  {arg.required ? `${arg.key} (required)` : arg.key}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <DraftField
-            label="new field name"
+            label={schema ? "other field name" : "new field name"}
             value=""
             commit={(text) => {
               const key = text.trim();
               if (Object.hasOwn(records, key)) return `${key} is already set.`;
-              if (key) update({ ...records, [key]: { lit: null } });
+              if (key) add(key);
             }}
           />
         </span>
@@ -239,6 +261,7 @@ export function StmtSlot({ macro, at, stmt, part, dispatch, renderBody }: StmtSl
   // As in `ExprEditor`: `SlotOf` ties the slot type to the field's value type.
   const update = (value: SlotValues[SlotDef["type"]]) =>
     dispatch({ type: "replaceNode", at, node: { ...stmt, [part.slot]: value } as Stmt });
+  const schema = stmt.op === "call" ? toolArgSlots(macro, stmt.tool) : undefined;
   if (part.type === "value") {
     const expr = slot?.type === "value" ? slot.value : undefined;
     return (
@@ -263,7 +286,7 @@ export function StmtSlot({ macro, at, stmt, part, dispatch, renderBody }: StmtSl
       {slot.type === "body" ? (
         renderBody(slot.value, path)
       ) : (
-        <Field macro={macro} path={path} slot={slot} dispatch={dispatch} type="any" update={update} />
+        <Field macro={macro} path={path} slot={slot} dispatch={dispatch} type="any" update={update} schema={schema} />
       )}
       {optional && part.type !== "args" ? (
         <button type="button" className="wmm-slot-button" aria-label={`Remove ${label}`} onClick={() => dispatch({ type: "clearSlot", at: path })}>

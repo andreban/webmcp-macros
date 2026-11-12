@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { Json, Macro } from "../macro/types";
+import { checkCompatibility } from "../macro/compat";
+import type { Json, Macro, ToolInfo } from "../macro/types";
 import { InputForm } from "../ui/InputForm";
 import { resultLine, useRun, type RunState } from "../ui/useRun";
 import { widgetStyles } from "./widgetStyles";
 
 export interface WidgetViewProps {
   macros: Macro[];
+  /** The page's tools now, which each macro is checked against. */
+  tools: readonly ToolInfo[];
   open: boolean;
   /** The macro whose input form is shown, if any. */
   selected: Macro | null;
@@ -22,7 +25,7 @@ export interface WidgetViewProps {
 
 /** The launcher's markup for a given state, without hooks into `chrome.*`, so it renders in tests. */
 export function WidgetView(props: WidgetViewProps) {
-  const { macros, open, selected, run, running } = props;
+  const { macros, tools, open, selected, run, running } = props;
   const status = run ? (
     <div className="wmm-run">
       <p className={`wmm-status ${run.result?.status ?? ""}`} role="status">
@@ -41,17 +44,28 @@ export function WidgetView(props: WidgetViewProps) {
   ) : macros.length > 0 ? (
     <>
       <p className="wmm-title">Macros for this page</p>
-      {macros.map((macro) => (
-        <div className="wmm-macro" key={macro.id}>
-          <div>
-            {macro.name}
-            {macro.description ? <small>{macro.description}</small> : null}
+      {macros.map((macro) => {
+        const compat = checkCompatibility(macro, tools);
+        return (
+          <div className="wmm-macro" key={macro.id}>
+            <div>
+              {macro.name}
+              {compat.status === "changed" ? <small>This site changed its tools since the macro was made.</small> : null}
+              {macro.description ? <small>{macro.description}</small> : null}
+            </div>
+            {/* Opening the editor needs an extension page; the side panel offers it. */}
+            {compat.status === "incompatible" ? (
+              <span className="wmm-stale" title="This site's tools changed. Update the macro in the editor.">
+                Needs update
+              </span>
+            ) : (
+              <button type="button" disabled={running} onClick={() => props.onLaunch(macro)}>
+                Run
+              </button>
+            )}
           </div>
-          <button type="button" disabled={running} onClick={() => props.onLaunch(macro)}>
-            Run
-          </button>
-        </div>
-      ))}
+        );
+      })}
     </>
   ) : null;
 
@@ -83,7 +97,7 @@ export function WidgetView(props: WidgetViewProps) {
 }
 
 /** The launcher with its state. `onBusyChange` reports whether a run is shown, which keeps it mounted. */
-export function Widget({ macros, onBusyChange }: { macros: Macro[]; onBusyChange(busy: boolean): void }) {
+export function Widget({ macros, tools, onBusyChange }: { macros: Macro[]; tools: readonly ToolInfo[]; onBusyChange(busy: boolean): void }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Macro | null>(null);
   const { run, running, start, stop, clear } = useRun();
@@ -100,6 +114,7 @@ export function Widget({ macros, onBusyChange }: { macros: Macro[]; onBusyChange
   return (
     <WidgetView
       macros={macros}
+      tools={tools}
       open={open}
       selected={selected}
       run={run}
@@ -119,7 +134,7 @@ export function Widget({ macros, onBusyChange }: { macros: Macro[]; onBusyChange
 }
 
 export interface Launcher {
-  render(macros: Macro[]): void;
+  render(macros: Macro[], tools: readonly ToolInfo[]): void;
   unmount(): void;
 }
 
@@ -139,7 +154,7 @@ export function mountLauncher(onBusyChange: (busy: boolean) => void): Launcher {
   document.documentElement.append(host);
   const root = createRoot(container);
   return {
-    render: (macros) => root.render(<Widget macros={macros} onBusyChange={onBusyChange} />),
+    render: (macros, tools) => root.render(<Widget macros={macros} tools={tools} onBusyChange={onBusyChange} />),
     unmount: () => {
       root.unmount();
       host.remove();
