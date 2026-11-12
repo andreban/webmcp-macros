@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { triggerSatisfied } from "../macro/matcher";
 import { isMacro, type Expr, type Macro, type Stmt } from "../macro/types";
 import { adventureMacro, flightSearchMacro, mazeMacro, rocketLauncherMacro, sampleMacros, tripPlanMacro } from "./index";
 
@@ -193,5 +194,19 @@ describe("sample macros", () => {
         for (const alias of set) expect(macro.tools[alias]?.site).toBe(macro.trigger.site);
       }
     });
+  });
+});
+
+describe("flight demo samples", () => {
+  const demo = "https://googlechromelabs.github.io/webmcp-tools/demos/react-flightsearch/";
+  // The results page registers these too, so only the URL tells the pages apart.
+  const tools = ["searchFlights", "setFilters", "listFlights"];
+
+  it.each([flightSearchMacro, tripPlanMacro])("offers $name on the search page", (macro) => {
+    for (const url of [demo, `${demo}#/`, `${demo}index.html`]) expect(triggerSatisfied(macro, url, tools)).toBe(true);
+  });
+
+  it.each([flightSearchMacro, tripPlanMacro])("does not offer $name on the results page, whose search never answers", (macro) => {
+    expect(triggerSatisfied(macro, `${demo}#/results?origin=LON&destination=PAR`, tools)).toBe(false);
   });
 });
