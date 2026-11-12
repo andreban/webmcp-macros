@@ -4,6 +4,7 @@ import { ExprPicker, formatLiteral, type LiteralType, parseLiteral, variableName
 import { type Slot as SlotDef, type SlotValue, type SlotValues, expressions, exprKind, readSlot } from "./registry";
 import { type ArgSlot, argOptions, type EnumOption, literalType, missingArgs, newArg, requiredArgs, schemaSlots, toolArgSlots } from "./schemaSlots";
 import { type EditorAction, isOptionalSlot, type Path } from "./state";
+import { resultFields } from "./resultFields";
 import { PageToolsContext, toolEntry } from "./ToolPalette";
 
 export interface SlotProps {
@@ -79,6 +80,8 @@ function ExprEditor({ macro, path, expr, dispatch, type, options }: EditorProps)
   const { label, bare } = expressions[exprKind(expr)];
   // Only a tool call's arguments have a schema; `obj` and `callProc` share the slot type.
   const schema = "call" in expr ? toolArgSlots(macro, expr.call) : undefined;
+  // Only a `get` has a path slot; its suggestions come from the value's outputSchema.
+  const fields = "get" in expr ? resultFields(macro, expr.get) : undefined;
   const parts = label.map((part, index) => {
     // A label is fixed per kind, so the position is a stable key.
     if (typeof part === "string") return <Fragment key={index}>{part}</Fragment>;
@@ -91,7 +94,7 @@ function ExprEditor({ macro, path, expr, dispatch, type, options }: EditorProps)
     const at = [...path, part.slot];
     return (
       <Fragment key={index}>
-        <Field macro={macro} path={at} slot={slot} dispatch={dispatch} type={type} options={options} update={update} schema={schema} />
+        <Field macro={macro} path={at} slot={slot} dispatch={dispatch} type={type} options={options} update={update} schema={schema} fields={fields} />
       </Fragment>
     );
   });
@@ -112,9 +115,11 @@ interface FieldProps extends Omit<EditorProps, "expr"> {
   update: Update;
   /** For an `args` slot of a tool call: the tool's schema arguments, when the macro saved its schema. */
   schema?: readonly ArgSlot[];
+  /** For a `path` slot: field paths the value's tool declares in its outputSchema. */
+  fields?: readonly string[] | undefined;
 }
 
-function Field({ macro, path, slot, dispatch, type, options, update, schema }: FieldProps) {
+function Field({ macro, path, slot, dispatch, type, options, update, schema, fields }: FieldProps) {
   const listId = useId();
   const nested = (expr: Expr, at: Path, label: string, known?: ArgSlot) => (
     <Slot
@@ -155,11 +160,19 @@ function Field({ macro, path, slot, dispatch, type, options, update, schema }: F
       );
     case "path":
       return (
-        <DraftField
-          label="field"
-          value={slot.value.join(".")}
-          commit={(text) => update(text.split(".").filter(Boolean).map((seg) => (/^\d+$/.test(seg) ? Number(seg) : seg)))}
-        />
+        <>
+          <DraftField
+            label="field"
+            value={slot.value.join(".")}
+            list={fields?.length ? listId : undefined}
+            commit={(text) => update(text.split(".").filter(Boolean).map((seg) => (/^\d+$/.test(seg) ? Number(seg) : seg)))}
+          />
+          {fields?.length ? (
+            <datalist id={listId}>
+              {fields.map((field) => <option key={field} value={field} />)}
+            </datalist>
+          ) : null}
+        </>
       );
     case "input":
       return <Choose label="input" value={slot.value} options={(macro.inputs ?? []).map((input) => [input.key, input.label])} onChange={update} />;

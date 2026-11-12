@@ -38,6 +38,19 @@ describe("Slot", () => {
     expect(html).toMatch(/<option value="code" selected="">Auth code<\/option>/);
   });
 
+  it("suggests a result's fields from its tool's outputSchema, keeping the field free text", () => {
+    const outputSchema = { type: "object", properties: { child: { type: "string" }, wishes: { type: "array" } } };
+    const withSchema: Macro = {
+      ...macro,
+      tools: { look: { site: "app", name: "look_around", outputSchema } },
+      program: [{ op: "call", tool: "look", saveAs: "letter" }],
+    };
+    const html = render({ get: { var: "letter" }, path: [] }, { macro: withSchema });
+    expect(html).toMatch(/aria-label="field"[^>]* list="[^"]+"/);
+    expect(html).toContain('<option value="child"></option><option value="wishes"></option>');
+    expect(render({ get: { var: "count" }, path: [] })).not.toMatch(/aria-label="field"[^>]* list=/);
+  });
+
   it("edits a tool call's tool and arguments", () => {
     const html = render({ call: "look", args: { dir: { lit: "north" } } });
     expect(html).toMatch(/<option value="look" selected="">look_around<\/option>/);
