@@ -78,8 +78,8 @@ interface EditorProps {
 /** Renders the expression's registry label, with a control for each of its slots. */
 function ExprEditor({ macro, path, expr, dispatch, type, options }: EditorProps) {
   const { label, bare } = expressions[exprKind(expr)];
-  // Only a tool call's arguments have a schema; `obj` and `callProc` share the slot type.
-  const schema = "call" in expr ? toolArgSlots(macro, expr.call) : undefined;
+  // A call's arguments come from the tool's schema or the procedure's parameters; an object's keys are free.
+  const schema = useArgSlots(macro, "call" in expr ? { tool: expr.call } : "callProc" in expr ? { proc: expr.callProc } : undefined);
   // Only a `get` has a path slot; its suggestions come from the value's outputSchema.
   const observed = useContext(PageToolsContext)?.observed;
   const fields = "get" in expr ? resultFields(macro, expr.get, observed) : undefined;
@@ -114,7 +114,7 @@ type Update = (value: SlotValues[SlotDef["type"]], tools?: Record<string, MacroT
 interface FieldProps extends Omit<EditorProps, "expr"> {
   slot: SlotValue;
   update: Update;
-  /** For an `args` slot of a tool call: the tool's schema arguments, when the macro saved its schema. */
+  /** For an `args` slot of a call: the arguments it takes, when known (see `useArgSlots`). */
   schema?: readonly ArgSlot[];
   /** For a `path` slot: field paths the value's tool declares in its outputSchema. */
   fields?: readonly string[] | undefined;
@@ -187,6 +187,8 @@ function Field({ macro, path, slot, dispatch, type, options, update, schema, fie
       const records = slot.value;
       const add = (key: string) => update({ ...records, [key]: newArg(schema, key) });
       const missing = schema ? missingArgs(schema, records) : [];
+      // An object's entries are keys; a call's, to a tool whose schema is unknown, are arguments.
+      const noun = path.at(-1) === "obj" ? "key" : "argument";
       return (
         <span className="wmm-args">
           {Object.entries(records).map(([key, value]) => {
@@ -212,19 +214,8 @@ function Field({ macro, path, slot, dispatch, type, options, update, schema, fie
               ))}
             </select>
           ) : null}
-          {/* A tool's schema lists its arguments; a free-form name is only for objects and tools without one. */}
-          {schema ? null : (
-            <DraftField
-              label="new field name"
-              placeholder="+ field"
-              value=""
-              commit={(text) => {
-                const key = text.trim();
-                if (Object.hasOwn(records, key)) return `${key} is already set.`;
-                if (key) add(key);
-              }}
-            />
-          )}
+          {/* Known arguments are offered above; a name is typed only for an object's keys or a tool nobody has described. */}
+          {schema ? null : <AddName noun={noun} taken={records} add={add} />}
         </span>
       );
     }
@@ -301,7 +292,7 @@ export function StmtSlot({ macro, at, stmt, part, dispatch, renderBody }: StmtSl
     if (node.op === "call" && Object.keys(args).length > 0) node.args = args;
     dispatch({ type: "replaceNode", at, node, tools });
   };
-  const schema = stmt.op === "call" ? toolArgSlots(macro, stmt.tool) : undefined;
+  const schema = useArgSlots(macro, stmt.op === "call" ? { tool: stmt.tool } : undefined);
   if (part.type === "value") {
     const expr = slot?.type === "value" ? slot.value : undefined;
     return (
@@ -424,6 +415,57 @@ function Choose({ label, value, options, onChange }: { label: string; value: str
 }
 
 /**
+ * The argument slots of a call: the tool's saved schema, else the live page's
+ * (a tool the page reports without one takes no arguments), or a procedure's
+ * parameters. `undefined` when nothing is known, so names are typed.
+ */
+function useArgSlots(macro: Macro, of: { tool: string } | { proc: string } | undefined): readonly ArgSlot[] | undefined {
+  const page = useContext(PageToolsContext);
+  if (of === undefined) return undefined;
+  if ("proc" in of) {
+    const proc = Object.hasOwn(macro.procedures ?? {}, of.proc) ? macro.procedures?.[of.proc] : undefined;
+    return proc?.params.map((key) => ({ key, required: true, kind: { type: "any" } }));
+  }
+  const saved = toolArgSlots(macro, of.tool);
+  if (saved) return saved;
+  const name = Object.hasOwn(macro.tools, of.tool) ? macro.tools[of.tool]?.name : undefined;
+  const live = page?.tools.find((tool) => tool.live && tool.name === name);
+  return live ? schemaSlots(live.inputSchema) : undefined;
+}
+
+/** "+ key" or "+ argument": a button that opens a field for the name, so a bare text box never sits on a block. */
+function AddName({ noun, taken, add }: { noun: string; taken: Readonly<Record<string, unknown>>; add: (key: string) => void }) {
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <button type="button" className="wmm-slot-button" onClick={() => setOpen(true)}>
+        + {noun}
+      </button>
+    );
+  }
+  return (
+    <input
+      className="wmm-slot-field"
+      aria-label={`new ${noun} name`}
+      placeholder={`${noun} name, then Enter`}
+      size={`${noun} name, then Enter`.length}
+      autoFocus
+      onBlur={() => setOpen(false)}
+      onKeyDown={(event) => {
+        const key = event.currentTarget.value.trim();
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          setOpen(false);
+        } else if (event.key === "Enter" && key && !Object.hasOwn(taken, key)) {
+          add(key);
+          setOpen(false);
+        }
+      }}
+    />
+  );
+}
+
+/**
  * A text field that commits on blur or Enter, so one edit is one undo step.
  * `commit` returns an error message to keep the draft and show it next to the
  * field; Escape drops the draft.
@@ -432,13 +474,11 @@ function DraftField({
   label,
   value,
   list,
-  placeholder,
   commit,
 }: {
   label: string;
   value: string;
   list?: string;
-  placeholder?: string;
   commit: (text: string) => string | undefined | void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
@@ -459,8 +499,7 @@ function DraftField({
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? errorId : undefined}
         value={text}
-        placeholder={placeholder}
-        size={Math.max(3, text.length, placeholder?.length ?? 0)}
+        size={Math.max(3, text.length)}
         list={list}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={save}

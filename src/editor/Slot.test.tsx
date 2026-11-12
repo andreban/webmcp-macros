@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { MACRO_VERSION, type Expr, type Macro, type Stmt } from "../macro/types";
+import { MACRO_VERSION, type Expr, type JsonSchema, type Macro, type Stmt } from "../macro/types";
 import { statements } from "./registry";
 import { Slot, type SlotProps, StmtSlot } from "./Slot";
 import { PageToolsContext, type PageTools } from "./ToolPalette";
@@ -56,7 +56,7 @@ describe("Slot", () => {
     expect(html).toMatch(/<option value="look" selected="">look_around<\/option>/);
     expect(html).toContain("dir: ");
     expect(html).toContain('aria-label="Remove dir"');
-    expect(html).toContain('aria-label="new field name"');
+    expect(html).toContain(">+ argument</button>"); // no schema saved and no page: names are typed
   });
 
   it("offers the page's tools that the macro does not use yet, so a new macro can pick one", () => {
@@ -119,14 +119,33 @@ describe("Slot", () => {
     expect(html).toContain('<option value="trajectory">trajectory (required)</option>');
     expect(html).toContain('<option value="crew">crew</option>');
     expect(html).not.toContain('<option value="auth_code">');
-    expect(html).not.toContain('aria-label="new field name"'); // the schema's fields are offered instead
+    expect(html).not.toContain('aria-label="new argument name"'); // the schema's fields are offered instead
+  });
+
+  it("offers a call's arguments from the live page's tool or the procedure's parameters", () => {
+    const page = (inputSchema?: JsonSchema) => (
+      <PageToolsContext value={{ site: "app", tools: [inputSchema ? { name: "look_around", live: true, inputSchema } : { name: "look_around", live: true }] }}>
+        <Slot macro={macro} path={["program", 0, "value"]} expr={{ call: "look", args: {} }} dispatch={() => {}} label="value" />
+      </PageToolsContext>
+    );
+    const described = renderToStaticMarkup(page({ type: "object", properties: { dir: { type: "string" } } }));
+    expect(described).toContain('<option value="dir">dir</option>');
+    expect(described).not.toContain(">+ argument</button>");
+    // The page reports the tool with no schema: it takes no arguments, so there is nothing to add.
+    const bare = renderToStaticMarkup(page());
+    expect(bare).not.toContain("+ argument");
+    const withProc: Macro = { ...macro, procedures: { visit: { params: ["room"], body: [] } } };
+    const proc = render({ callProc: "visit", args: {} }, { macro: withProc });
+    expect(proc).toContain('<option value="room">room (required)</option>');
+    expect(proc).not.toContain(">+ argument</button>");
   });
 
   it("keeps free-form arguments without a schema, and for objects and procedures", () => {
     for (const expr of [{ call: "look", args: {} }, { obj: {} }, { callProc: "p", args: {} }] satisfies Expr[]) {
       const html = render(expr);
       expect(html).not.toContain('aria-label="add argument"');
-      expect(html).toContain('aria-label="new field name"');
+      // An object's entries are keys, a call's are arguments; a button opens the name field.
+      expect(html).toContain("obj" in expr ? ">+ key</button>" : ">+ argument</button>");
     }
   });
 
@@ -172,7 +191,7 @@ describe("StmtSlot", () => {
   it("edits leaf fields in place", () => {
     const html = renderStmt({ op: "call", tool: "look", saveAs: "seen" });
     expect(html).toMatch(/<option value="look" selected="">look_around<\/option>/);
-    expect(html).toContain('aria-label="new field name"'); // absent args edit as none
+    expect(html).toContain(">+ argument</button>"); // absent args edit as none
     expect(html).toMatch(/ as <input[^>]*aria-label="variable"[^>]* value="seen"/);
     expect(html).toContain('aria-label="Remove save result"');
     expect(renderStmt({ op: "wait", ms: 250 })).toMatch(/aria-label="milliseconds"[^>]* value="250"/);
