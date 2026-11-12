@@ -111,7 +111,7 @@ function daysBetween(values: Json[]): Json {
 
 const inputs = {
   origin: "LON",
-  city: "Paris",
+  destination: "PAR",
   checkIn: "2026-12-01",
   checkOut: "2026-12-05",
   travellers: 2,
@@ -158,7 +158,14 @@ describe("tripPlanMacro", () => {
     ]);
   });
 
-  it("passes the city code, the computed nights and the travellers to the demos", async () => {
+  it("asks for the destination as an IATA code, like the origin", () => {
+    const destination = tripPlanMacro.inputs?.find((i) => i.key === "destination");
+    expect(destination?.label).toBe("To (IATA)");
+    expect(destination?.default).toBe("PAR");
+    expect(destination?.schema.enum).toEqual(["NYC", "PAR", "TYO"]);
+  });
+
+  it("passes the IATA code to the flights, the city name to the hotels, and the computed nights and the travellers to the demos", async () => {
     const demos = fakeDemos();
     const calls: { name: string; args: Record<string, Json> }[] = [];
     const callTool = demos.host.callTool.bind(demos.host);
@@ -169,7 +176,7 @@ describe("tripPlanMacro", () => {
         return callTool(name, args, site);
       },
     };
-    await runMacro(tripPlanMacro, host, { inputs: { ...inputs, city: "Tokyo", directOnly: true } });
+    await runMacro(tripPlanMacro, host, { inputs: { ...inputs, destination: "TYO", directOnly: true } });
 
     expect(calls.find((c) => c.name === "searchFlights")?.args).toEqual({
       origin: "LON",
