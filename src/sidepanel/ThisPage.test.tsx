@@ -74,6 +74,7 @@ describe("ThisPageView", () => {
   it("lists matching macros with Run, and tools with name and description", () => {
     const html = render(ready);
     expect(html.match(/<button type="button">Run<\/button>/g)).toHaveLength(2);
+    expect(html.match(/aria-label="Edit [^"]+">Edit<\/button>/g)).toHaveLength(2);
     expect(html).toContain("<summary>2 WebMCP tools on this page</summary>");
     expect(html).toContain('<code>get_page_state</code><p class="muted">Reads the console.</p>');
     expect(html).toContain("<code>calculate_fuel</code></li>");
