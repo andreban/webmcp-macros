@@ -4,11 +4,11 @@
 import { type Dispatch, type DragEvent, type HTMLAttributes, type PointerEvent, useRef, useState } from "react";
 import type { Macro } from "../macro/types";
 import { pathKey } from "./blockNav";
-import { createDefault, type StmtOp } from "./registry";
+import type { Insert } from "./Palette";
 import { createEditorState, type EditorAction, editorReducer, moveTarget, type Path } from "./state";
 
 /** What is being dragged: a statement of the program, or a new block from the palette. */
-export type DragItem = { kind: "stmt"; from: Path } | { kind: "palette"; op: StmtOp };
+export type DragItem = { kind: "stmt"; from: Path } | { kind: "palette"; insert: Insert };
 
 /** Where a drop on a block lands: before it in the upper half, after it in the lower half. */
 export function dropPosition(at: Path, lowerHalf: boolean): Path {
@@ -25,7 +25,7 @@ export function dropAction(macro: Macro, item: DragItem, to: Path): EditorAction
   const action: EditorAction =
     item.kind === "stmt"
       ? { type: "moveStmt", from: item.from, to }
-      : { type: "insertStmt", at: to, stmt: createDefault(item.op) };
+      : { type: "insertStmt", at: to, stmt: item.insert.stmt, tools: item.insert.tools };
   return editorReducer(createEditorState(macro, 0), action).macro === macro ? undefined : action;
 }
 
@@ -64,8 +64,8 @@ export interface BlockDrag {
   block: (at: Path) => DragProps;
   /** An empty body, at its position 0: blocks dropped into it. */
   empty: (at: Path) => DragProps;
-  /** A palette option: dragging it inserts a new block of that kind. */
-  paletteItem: (op: StmtOp) => DragProps;
+  /** A palette option: dragging it inserts its block, with any tool it adds to the macro. */
+  paletteItem: (insert: Insert) => DragProps;
 }
 
 /** `onDropped` gets the path of the dropped statement, so focus can follow it. */
@@ -83,7 +83,7 @@ export function useBlockDrag(macro: Macro, dispatch: Dispatch<EditorAction>, onD
       event.stopPropagation();
       dragged.current = item;
       event.dataTransfer.effectAllowed = item.kind === "stmt" ? "move" : "copy";
-      event.dataTransfer.setData(MIME, item.kind === "stmt" ? pathKey(item.from) : item.op);
+      event.dataTransfer.setData(MIME, item.kind === "stmt" ? pathKey(item.from) : item.insert.stmt.op);
     },
     onDragEnd() {
       dragged.current = null;
@@ -136,6 +136,6 @@ export function useBlockDrag(macro: Macro, dispatch: Dispatch<EditorAction>, onD
   return {
     block: (at) => ({ ...source({ kind: "stmt", from: at }), ...target(at, false) }),
     empty: (at) => target(at, true),
-    paletteItem: (op) => source({ kind: "palette", op }),
+    paletteItem: (insert) => source({ kind: "palette", insert }),
   };
 }

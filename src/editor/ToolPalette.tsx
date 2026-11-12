@@ -1,8 +1,8 @@
-import { createContext, Fragment } from "react";
+import { createContext } from "react";
 import { schemaHash } from "../macro/compat";
 import { siteMatches } from "../macro/matcher";
 import type { JsonSchema, Macro, MacroTool, Stmt } from "../macro/types";
-import { type ArgSlot, requiredArgs, schemaSlots } from "./schemaSlots";
+import { requiredArgs, schemaSlots } from "./schemaSlots";
 import type { LivePage } from "./SitesPanel";
 
 /** A tool the palette offers: one the page registers now, or one the macro already uses. */
@@ -106,68 +106,3 @@ export const PageToolsContext = createContext<PageTools | undefined>(undefined);
 
 /** Shown wherever tools are missing because the editor was not opened from a page. */
 export const NO_TAB = "No page to read tools from. Open the page you want to automate and choose New macro for this page in the side panel.";
-
-const describeSlot = (slot: ArgSlot) => (slot.kind.type === "enum" ? `${slot.key}: ${slot.kind.options.join(" | ")}` : `${slot.key}: ${slot.kind.type}`);
-
-export interface ToolPaletteProps {
-  macro: Macro;
-  page: LivePage | undefined;
-  onPick: (call: ReturnType<typeof toolCall>) => void;
-}
-
-/**
- * One call block per tool, generated from the tools' schemas. Tools the tab
- * does not register now are greyed out, not hidden: tools come and go with the
- * page's state, and the snapshot is enough to edit the call. Iframe tools
- * are listed under their frame's origin.
- */
-export function ToolPalette({ macro, page, onPick }: ToolPaletteProps) {
-  const site = pageSite(macro, page?.url);
-  const tools = paletteTools(macro, page, site);
-  // The top frame's tools first, then one group per iframe origin.
-  const groups = new Map<string | undefined, PaletteTool[]>([[undefined, []]]);
-  for (const tool of tools) groups.set(tool.origin, [...(groups.get(tool.origin) ?? []), tool]);
-  return (
-    <div className="tool-palette">
-      <span>Insert tool call</span>
-      {tools.length === 0 ? <p className="muted">{page ? "This tab registers no tools right now." : NO_TAB}</p> : null}
-      {[...groups].map(([origin, group]) =>
-        group.length === 0 ? null : (
-          <Fragment key={origin ?? ""}>
-            {origin === undefined ? null : <span className="muted">In an iframe from {origin}</span>}
-            <ul aria-label={origin === undefined ? "Tools" : `Tools in an iframe from ${origin}`} className="palette-options">
-              {group.map((tool) => (
-                <li key={tool.name}>
-                  <ToolOption tool={tool} onPick={() => onPick(toolCall(macro, tool, site))} />
-                </li>
-              ))}
-            </ul>
-          </Fragment>
-        ),
-      )}
-    </div>
-  );
-}
-
-function ToolOption({ tool, onPick }: { tool: PaletteTool; onPick: () => void }) {
-  const slots = schemaSlots(tool.inputSchema);
-  const optional = slots.filter((slot) => !slot.required).length;
-  return (
-    <button
-      type="button"
-      className={`wmm-block wmm-block--call${tool.live ? "" : " wmm-tool--absent"}`}
-      title={tool.description}
-      onClick={onPick}
-    >
-      <span className="wmm-verb">call</span> {tool.name}
-      {slots.filter((slot) => slot.required).map((slot) => (
-        <Fragment key={slot.key}>
-          {" "}
-          <span className="wmm-pill">{describeSlot(slot)}</span>
-        </Fragment>
-      ))}
-      {optional > 0 ? <span className="muted"> +{optional} optional</span> : null}
-      {tool.live ? null : <span className="muted"> (not on this page)</span>}
-    </button>
-  );
-}

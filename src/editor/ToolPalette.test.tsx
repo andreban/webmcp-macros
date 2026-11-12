@@ -6,7 +6,8 @@ import { rocketLauncherMacro } from "../samples";
 import { createNewMacro } from "./page";
 import type { LivePage } from "./SitesPanel";
 import { createEditorState, editorReducer } from "./state";
-import { aliasFor, pageSite, paletteTools, ToolPalette, toolCall } from "./ToolPalette";
+import { Palette } from "./Palette";
+import { aliasFor, pageSite, paletteTools, toolCall } from "./ToolPalette";
 
 const fuelSchema = {
   type: "object",
@@ -100,9 +101,8 @@ describe("iframe tools", () => {
       { name: "whoami", live: false, origin: inner, frameOrigin: inner },
     ]);
     expect(paletteTools(saved, framed, "main").filter((tool) => !tool.live)).toEqual([]);
-    const html = renderToStaticMarkup(<ToolPalette macro={macro} page={framed} onPick={() => {}} />);
-    expect(html).toContain(`In an iframe from ${inner}</span><ul aria-label="Tools in an iframe from ${inner}"`);
-    expect(html.indexOf('aria-label="Tools"')).toBeLessThan(html.indexOf("In an iframe"));
+    const html = renderToStaticMarkup(<Palette macro={macro} page={framed} onPick={() => {}} onCancel={() => {}} />);
+    expect(html).toContain(`in an iframe from ${inner}`);
   });
 });
 
@@ -147,9 +147,12 @@ describe("toolCall", () => {
   });
 });
 
-describe("ToolPalette", () => {
+describe("Palette's page tools", () => {
+  const render = (props: Pick<Parameters<typeof Palette>[0], "macro" | "page">) =>
+    renderToStaticMarkup(<Palette {...props} onPick={() => {}} onCancel={() => {}} />);
+
   it("shows required slots, counts optional ones and greys out tools missing from the page", () => {
-    const html = renderToStaticMarkup(<ToolPalette macro={rocketLauncherMacro} page={page} onPick={() => {}} />);
+    const html = render({ macro: rocketLauncherMacro, page });
     expect(html).toContain("amount: number</span>");
     expect(html).toContain(" +1 optional</span>");
     expect(html).toMatch(/wmm-tool--absent"[^>]*><span class="wmm-verb">call<\/span> ignite_engines/);
@@ -157,7 +160,7 @@ describe("ToolPalette", () => {
   });
 
   it("says when there is no tab", () => {
-    const html = renderToStaticMarkup(<ToolPalette macro={createNewMacro(undefined, "m")} page={undefined} onPick={() => {}} />);
+    const html = render({ macro: createNewMacro(undefined, "m"), page: undefined });
     expect(html).toContain("No page to read tools from. Open the page you want to automate");
   });
 });

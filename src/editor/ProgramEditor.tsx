@@ -3,11 +3,11 @@ import type { Macro, MacroTool, Stmt } from "../macro/types";
 import { focusAfterRemove, focusStops, insertionPoint, moveDestination, pathKey } from "./blockNav";
 import { type BlockDrag, useBlockDrag } from "./dnd";
 import { Palette } from "./Palette";
-import { createDefault, type Slot, type StmtOp, statements } from "./registry";
+import { type Slot, statements } from "./registry";
 import type { LivePage } from "./SitesPanel";
 import { StmtSlot } from "./Slot";
 import { type EditorAction, getNode, moveTarget, type Path } from "./state";
-import { PageToolsContext, pageSite, paletteTools, ToolPalette } from "./ToolPalette";
+import { PageToolsContext, pageSite, paletteTools } from "./ToolPalette";
 
 interface View {
   macro: Macro;
@@ -121,20 +121,27 @@ export function ProgramEditor({
   const pageTools = page ? { tools: paletteTools(macro, page, site), site } : undefined;
   return (
     <PageToolsContext value={pageTools}>
-      <div className="wmm-program">
-        <p id={hintId} className="muted">
-          Arrow keys move between blocks, Alt+Up and Alt+Down move a block, Delete removes it, and / inserts after it. Blocks can also be dragged.
-        </p>
-        <div ref={root} onKeyDown={onKeyDown} onFocus={onFocus} onBlur={onBlur}>
-          <Body view={view} body={macro.program} at={["program"]} />
-        </div>
-        <Palette
-          inputRef={paletteInput}
-          onPick={(op: StmtOp) => insert(createDefault(op))}
-          onCancel={() => go(current)}
-          itemProps={drag.paletteItem}
-        />
-        <ToolPalette macro={macro} page={page} onPick={({ stmt, tools }) => insert(stmt, tools)} />
+      <div className="wmm-program workspace">
+        <aside className="palette-pane">
+          <Palette
+            macro={macro}
+            page={page}
+            inputRef={paletteInput}
+            onPick={({ stmt, tools }) => insert(stmt, tools)}
+            onCancel={() => go(current)}
+            itemProps={drag.paletteItem}
+          />
+        </aside>
+        <section className="program-pane" aria-labelledby={`${hintId}-heading`}>
+          <h2 id={`${hintId}-heading`}>Program</h2>
+          <p id={hintId} className="muted">
+            New blocks go after the marked block. Arrow keys move between blocks, Alt+Up and Alt+Down move a block, Delete
+            removes it, and / jumps to the palette. Blocks can also be dragged.
+          </p>
+          <div ref={root} onKeyDown={onKeyDown} onFocus={onFocus} onBlur={onBlur}>
+            <Body view={view} body={macro.program} at={["program"]} />
+          </div>
+        </section>
       </div>
     </PageToolsContext>
   );
