@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { argKind, defaultArg, requiredArgs, schemaSlots } from "./schemaSlots";
+import { MACRO_VERSION, type Macro } from "../macro/types";
+import { argKind, defaultArg, literalType, missingArgs, newArg, requiredArgs, schemaSlots, toolArgSlots } from "./schemaSlots";
 
 // The rocket fixture's schemas (e2e/fixtures/rocket.html).
 const trajectory = { type: "string", enum: ["Moon", "Mars", "ISS", "Jupiter"] };
@@ -113,5 +114,56 @@ describe("requiredArgs", () => {
     expect(defaultArg(argKind(flight.setFilters.properties.departure))).toEqual({ obj: { from: { lit: "" } } });
     expect(defaultArg({ type: "boolean" })).toEqual({ lit: false });
     expect(defaultArg({ type: "list", items: { type: "number" } })).toEqual({ list: [] });
+  });
+});
+
+describe("argument suggestions", () => {
+  const macro: Macro = {
+    wmm: MACRO_VERSION,
+    id: "m",
+    name: "M",
+    sites: { app: { match: ["https://example.com/*"] } },
+    tools: {
+      launch: { site: "app", name: "prepare_launch", inputSchema: rocket.prepare_launch },
+      bare: { site: "app", name: "bare" },
+    },
+    trigger: { site: "app", anyOf: [["launch"]] },
+    program: [],
+  };
+
+  it("reads a tool's saved schema, and nothing for a tool without one", () => {
+    expect(toolArgSlots(macro, "launch")?.map((slot) => [slot.key, slot.required])).toEqual([
+      ["auth_code", true],
+      ["trajectory", true],
+    ]);
+    expect(toolArgSlots(macro, "bare")).toBeUndefined();
+    expect(toolArgSlots(macro, "gone")).toBeUndefined();
+    expect(toolArgSlots(macro, "toString")).toBeUndefined();
+  });
+
+  it("offers the schema keys not set yet, in the schema's order", () => {
+    const slots = schemaSlots(flight.searchFlights);
+    const offered = missingArgs(slots, { origin: { lit: "SFO" }, legacy: { lit: 1 } }).map((slot) => slot.key);
+    expect(offered[0]).toBe("destination");
+    expect(offered).not.toContain("origin");
+    expect(offered).not.toContain("legacy");
+    expect(offered).toContain("inboundDate");
+  });
+
+  it("starts a new argument at its schema type's default, and a key outside the schema at null", () => {
+    const slots = [...schemaSlots(rocket.prepare_launch), ...schemaSlots(flight.searchFlights), ...schemaSlots(flight.setFilters)];
+    expect(newArg(slots, "auth_code")).toEqual({ lit: "" });
+    expect(newArg(slots, "trajectory")).toEqual({ lit: "Moon" });
+    expect(newArg(slots, "passengers")).toEqual({ lit: 0 });
+    expect(newArg(slots, "flexible")).toEqual({ lit: false });
+    expect(newArg(slots, "legacy")).toEqual({ lit: null });
+    expect(newArg(undefined, "auth_code")).toEqual({ lit: null });
+  });
+
+  it("types an argument's literal by its kind, enums and untyped ones as any value", () => {
+    expect(literalType({ type: "text" })).toBe("text");
+    expect(literalType({ type: "number" })).toBe("number");
+    expect(literalType({ type: "enum", options: ["a"] })).toBe("any");
+    expect(literalType({ type: "any" })).toBe("any");
   });
 });
