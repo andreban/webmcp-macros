@@ -24,7 +24,8 @@ describe("EditorView", () => {
     const html = render();
     expect(html).toContain(`value="${rocketLauncherMacro.name}"`);
     expect(html).toContain("<textarea");
-    expect(html).toContain('class="wmm-program"');
+    expect(html).toContain('class="wmm-program workspace"');
+    expect(html).toContain("Macro settings <span class=\"muted\">· 2 inputs. No tab to check the trigger against.</span>");
     expect(html).toContain(`<title>${rocketLauncherMacro.name} · WebMCP Macros</title>`);
   });
 

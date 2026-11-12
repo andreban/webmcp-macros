@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { rocketLauncherMacro } from "../samples";
-import { matchOps, Palette } from "./Palette";
+import { GROUPS, matchOps, Palette, paletteEntries } from "./Palette";
+import { createNewMacro } from "./page";
 import { ProgramEditor } from "./ProgramEditor";
 import { statements } from "./registry";
 
@@ -39,9 +40,19 @@ describe("Palette", () => {
     expect(matchOps("zzz")).toEqual([]);
   });
 
-  it("is a combobox whose first option is active", () => {
-    const html = renderToStaticMarkup(<Palette onPick={() => {}} onCancel={() => {}} />);
-    expect(html.match(/role="option"/g)).toHaveLength(Object.keys(statements).length);
+  it("groups the page's tools first, then each category in turn", () => {
+    const page = { url: "https://example.com/", tools: [{ name: "look" }] };
+    const entries = paletteEntries(createNewMacro(page.url, "m"), page, "");
+    expect(entries[0]).toMatchObject({ group: "page", tool: { name: "look", live: true } });
+    const groups = entries.map((entry) => entry.group);
+    expect(groups.filter((group, i) => group !== groups[i - 1])).toEqual(GROUPS.map(({ group }) => group));
+    expect(paletteEntries(createNewMacro(page.url, "m"), page, "loo").map((entry) => entry.key)).toEqual(["tool  look"]);
+  });
+
+  it("is a combobox whose first option is active, with one group per category", () => {
+    const html = renderToStaticMarkup(<Palette macro={rocketLauncherMacro} page={undefined} onPick={() => {}} onCancel={() => {}} />);
+    expect(html.match(/role="option"/g)).toHaveLength(Object.keys(statements).length + Object.keys(rocketLauncherMacro.tools).length);
     expect(html).toMatch(/aria-activedescendant="([^"]+)"[^]*id="\1" role="option" aria-selected="true"/);
+    expect(html.match(/role="group"/g)).toHaveLength(GROUPS.length);
   });
 });
