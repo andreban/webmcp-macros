@@ -29,7 +29,7 @@ describe("createNewMacro", () => {
   it("makes a valid empty macro for the page's origin, without its query", () => {
     const macro = createNewMacro("https://example.com/app/?user=me#x", "id-1");
     expect(isMacro(macro)).toBe(true);
-    expect(macro).toMatchObject({ id: "id-1", program: [], tools: {}, trigger: { site: "main", anyOf: [] } });
+    expect(macro).toMatchObject({ id: "id-1", program: [], tools: {}, trigger: { site: "main", anyOf: [[]] } });
     expect(macro.sites).toEqual({ main: { match: ["https://example.com/*"], startUrl: "https://example.com/app/" } });
     expect(JSON.stringify(macro)).not.toContain("user=me");
   });

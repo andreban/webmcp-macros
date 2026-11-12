@@ -44,7 +44,8 @@ export function createNewMacro(pageUrl: string | undefined, id: string = crypto.
     name: "Untitled macro",
     sites: site ? { main: site } : {},
     tools: {},
-    trigger: { site: "main", anyOf: [] },
+    // What `defaultTrigger` proposes for an empty program, so the trigger follows the program from the start.
+    trigger: { site: "main", anyOf: [[]] },
     program: [],
   };
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MACRO_VERSION, type Macro, type MacroInput, type Stmt } from "../macro/types";
+import { createNewMacro } from "./page";
 import {
   createEditorState,
   describePath,
@@ -353,5 +354,29 @@ describe("input actions", () => {
     expect(run(start, { type: "removeInput", index: 0 })).toBe(start);
     expect(run(start, { type: "removeInput", index: 1 })).toBe(start);
     expect(run(start, { type: "removeInput", index: 2 }).macro.inputs?.map((i) => i.key)).toEqual(["when", "who"]);
+  });
+});
+
+describe("trigger following the program", () => {
+  const fresh = (): Macro => ({
+    ...createNewMacro("https://example.com/", "m"),
+    tools: { look: { site: "main", name: "look" }, go: { site: "main", name: "go" } },
+  });
+
+  it("keeps a proposed trigger in step with each program edit, in the same undo step", () => {
+    const start = createEditorState(fresh());
+    const one = editorReducer(start, { type: "insertStmt", at: ["program", 0], stmt: { op: "call", tool: "look" } });
+    expect(one.macro.trigger).toEqual({ site: "main", anyOf: [["look"]] });
+    const two = editorReducer(one, { type: "insertStmt", at: ["program", 0], stmt: { op: "waitForTool", tool: "go" } });
+    expect(two.macro.trigger).toEqual({ site: "main", anyOf: [[]] });
+    expect(editorReducer(two, { type: "undo" }).macro).toBe(one.macro);
+  });
+
+  it("stops following once the trigger is edited by hand", () => {
+    const start = createEditorState(fresh());
+    const own = { site: "main", anyOf: [["go"]] };
+    const edited = editorReducer(start, { type: "setMeta", meta: { trigger: own } });
+    const next = editorReducer(edited, { type: "insertStmt", at: ["program", 0], stmt: { op: "call", tool: "look" } });
+    expect(next.macro.trigger).toBe(own);
   });
 });
