@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { MACRO_VERSION, type Expr, type Macro, type Stmt } from "../macro/types";
 import { statements } from "./registry";
 import { Slot, type SlotProps, StmtSlot } from "./Slot";
+import { PageToolsContext, type PageTools } from "./ToolPalette";
 
 const macro: Macro = {
   wmm: MACRO_VERSION,
@@ -43,6 +44,37 @@ describe("Slot", () => {
     expect(html).toContain("dir: ");
     expect(html).toContain('aria-label="Remove dir"');
     expect(html).toContain('aria-label="new field name"');
+  });
+
+  it("offers the page's tools that the macro does not use yet, so a new macro can pick one", () => {
+    const pageTools: PageTools = {
+      site: "app",
+      tools: [
+        { name: "look_around", live: true },
+        { name: "open_door", live: true },
+        { name: "framed", live: true, origin: "https://frame.example" },
+        { name: "gone", live: false },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      <PageToolsContext value={pageTools}>
+        <Slot macro={macro} path={["program", 0, "value"]} expr={{ call: "" }} dispatch={() => {}} label="value" />
+      </PageToolsContext>,
+    );
+    expect(html).toContain('<option value="" selected="">Choose tool</option>');
+    expect(html).toContain('<optgroup label="In this macro"><option value="look">look_around</option></optgroup>');
+    // look_around is already declared, and a tool the page no longer registers is not offered.
+    expect(html).toContain(
+      '<optgroup label="On this page"><option value="page:0">open_door</option><option value="page:1">framed (https://frame.example)</option></optgroup>',
+    );
+  });
+
+  it("says why a tool slot has nothing to offer", () => {
+    const empty = { ...macro, tools: {} };
+    const slot = <Slot macro={empty} path={["program", 0, "value"]} expr={{ call: "" }} dispatch={() => {}} label="value" />;
+    expect(renderToStaticMarkup(slot)).toContain("No page to read tools from");
+    const html = renderToStaticMarkup(<PageToolsContext value={{ site: "app", tools: [] }}>{slot}</PageToolsContext>);
+    expect(html).toContain("This page registers no tools");
   });
 
   it("suggests a call's arguments from the tool's saved schema", () => {

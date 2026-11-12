@@ -158,6 +158,20 @@ describe("editorReducer", () => {
     expect(ifStmt?.op === "if" && ifStmt.then).toBe(before.program[1]?.op === "if" && before.program[1].then);
   });
 
+  it("adds the tools a replaced node needs in the same undo step", () => {
+    const before = sample();
+    const look = { site: before.trigger.site, name: "look_around" };
+    const state = run(createEditorState(before), {
+      type: "replaceNode",
+      at: ["program", 2],
+      node: { op: "call", tool: "look" },
+      tools: { look },
+    });
+    expect(state.macro.tools.look).toEqual(look);
+    expect(state.macro.program[2]).toEqual({ op: "call", tool: "look" });
+    expect(run(state, { type: "undo" }).macro).toBe(before);
+  });
+
   it("never mutates the previous macro", () => {
     const before = sample();
     const snapshot = structuredClone(before);
