@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Macro } from "./macro/types";
-import { isBackgroundRequest, isExecuteToolResponse, isRunEvent, type BackgroundRequest, type RunEvent } from "./messages";
+import { isBackgroundRequest, isExecuteToolResponse, isFrameToolLists, isRunEvent, type BackgroundRequest, type RunEvent } from "./messages";
 
 const SAMPLE: Macro = {
   wmm: 1,
@@ -53,6 +53,7 @@ describe("isBackgroundRequest", () => {
     { type: "run-macro", macro: SAMPLE, inputs: {}, tabId: 4 },
     { type: "stop-run" },
     { type: "stop-run", tabId: 4 },
+    { type: "list-frame-tools", tabId: 4 },
   ])("accepts a well-formed $type", (message) => {
     expect(isBackgroundRequest(message)).toBe(true);
   });
@@ -69,9 +70,25 @@ describe("isBackgroundRequest", () => {
     ["inputs that are a list", { type: "run-macro", macroId: "m", inputs: [] }],
     ["a string tabId", { type: "stop-run", tabId: "4" }],
     ["a fractional tabId", { type: "run-macro", macroId: "m", inputs: {}, tabId: 1.5 }],
+    ["a frame listing without a tab", { type: "list-frame-tools" }],
   ])("rejects %s", (_label, message) => {
     expect(isBackgroundRequest(message)).toBe(false);
   });
+});
+
+describe("isFrameToolLists", () => {
+  it("accepts frames with or without an origin", () => {
+    expect(isFrameToolLists([{ frameId: 0, tools: [{ name: "a" }] }, { frameId: 3, origin: "https://x.test", tools: [] }])).toBe(true);
+    expect(isFrameToolLists([])).toBe(true);
+  });
+
+  it.each<unknown>([
+    null,
+    {},
+    [{ frameId: "0", tools: [] }],
+    [{ frameId: 0, origin: 1, tools: [] }],
+    [{ frameId: 0, tools: [{ description: "no name" }] }],
+  ])("rejects %j", (value) => expect(isFrameToolLists(value)).toBe(false));
 });
 
 describe("isExecuteToolResponse", () => {

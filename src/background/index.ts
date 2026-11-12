@@ -64,7 +64,7 @@ void resumeRuns().catch(() => {});
 chrome.runtime.onInstalled.addListener(() => void seedSamples().catch(() => {}));
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
-chrome.runtime.onMessage.addListener((message: unknown, sender) => {
+chrome.runtime.onMessage.addListener((message: unknown, sender, reply) => {
   if (!isBackgroundRequest(message)) return false;
   // A content script leaves `tabId` out; the side panel names the tab.
   const tabId = ("tabId" in message ? message.tabId : undefined) ?? sender.tab?.id;
@@ -88,6 +88,10 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
     case "stop-run":
       runHost.stopRun(tabId);
       break;
+    case "list-frame-tools":
+      void runHost.listFrames(tabId).then(reply, () => reply([]));
+      // Keeps the channel open for the asynchronous reply.
+      return true;
     default:
       throw new Error(`Unhandled request: ${JSON.stringify(message satisfies never)}`);
   }

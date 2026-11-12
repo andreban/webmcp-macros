@@ -359,6 +359,18 @@ async function framesScenario(context, worker, panel) {
   );
   const stamped = await page.frameLocator("iframe").locator("#stamped").textContent();
   check("the iframe's page changed", stamped === "yes", stamped);
+
+  // The listing the editor's tool palette reads.
+  const listed = await panel.evaluate((tabId) => chrome.runtime.sendMessage({ type: "list-frame-tools", tabId }), tabId);
+  const iframe = listed?.find((frame) => frame.frameId !== 0);
+  check(
+    "the frame listing has the top frame's tools and the iframe's under its origin",
+    listed?.[0]?.frameId === 0 &&
+      listed[0].tools.some((tool) => tool.name === "whoami") &&
+      iframe?.origin === innerOrigin &&
+      iframe.tools.some((tool) => tool.name === "stamp_inner"),
+    JSON.stringify(listed),
+  );
 }
 
 /**

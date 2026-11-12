@@ -3,7 +3,7 @@
  * tab and frame, and the `ToolHost` that connects a run to its tab. Chrome is reached
  * only through `RunHostDeps`, so this module runs under Vitest in Node.
  */
-import { isExecuteToolResponse, isToolList, type ContentRequest, type RunEvent } from "../messages";
+import { isExecuteToolResponse, isToolList, type ContentRequest, type FrameToolList, type RunEvent } from "../messages";
 import type { Json, Macro, ToolInfo } from "../macro/types";
 import { MacroRunError, startRun as initialState, step, type RunResult, type ToolHost } from "../runner/interpreter";
 import { statementPath, type RunState } from "../runner/machine";
@@ -27,6 +27,8 @@ export interface RunHostDeps {
 export interface RunHost {
   /** Records the tools a frame's content script reported and wakes waiting runs. */
   setTools(tabId: number, tools: ToolInfo[], frameId?: number, origin?: string): void;
+  /** Re-lists the tab's frames, then returns each frame's tools, the top frame first. */
+  listFrames(tabId: number): Promise<FrameToolList[]>;
   /** Runs a saved macro, by id, or the macro given, on the tab. Ignored while that tab already has a run. */
   startRun(tabId: number, macro: string | Macro, inputs: Record<string, Json>): Promise<void>;
   /** Continues a run saved by an earlier worker. Ignored while that tab already has a run. */
@@ -51,7 +53,8 @@ const DEFAULT_REPORT_TIMEOUT_MS = 10_000;
 interface FrameTools {
   /** The frame's origin as Chrome reported it; unknown for a frame only ever polled. */
   origin?: string;
-  names: string[];
+  /** As the frame reported them, so the editor can list them with their schemas. */
+  tools: ToolInfo[];
 }
 
 export function createRunHost(deps: RunHostDeps): RunHost {
@@ -84,7 +87,7 @@ export function createRunHost(deps: RunHostDeps): RunHost {
   const setTools = (tabId: number, tools: ToolInfo[], frameId = 0, origin?: string): void => {
     if (frameId === 0) awaitingReport.delete(tabId);
     const known = frames(tabId);
-    known.set(frameId, { origin: origin ?? known.get(frameId)?.origin, names: tools.map((tool) => tool.name) });
+    known.set(frameId, { origin: origin ?? known.get(frameId)?.origin, tools });
     wake(tabId);
   };
 
@@ -123,7 +126,7 @@ export function createRunHost(deps: RunHostDeps): RunHost {
   const frameFor = (tabId: number, name: string, frameOrigin?: string): number | undefined => {
     if (awaitingReport.has(tabId)) return undefined;
     const candidates = [...(framesByTab.get(tabId) ?? [])]
-      .filter(([, frame]) => frame.names.includes(name) && (frameOrigin === undefined || frame.origin === frameOrigin))
+      .filter(([, frame]) => frame.tools.some((tool) => tool.name === name) && (frameOrigin === undefined || frame.origin === frameOrigin))
       .map(([id]) => id);
     return candidates.length > 0 ? Math.min(...candidates) : undefined;
   };
@@ -265,6 +268,13 @@ export function createRunHost(deps: RunHostDeps): RunHost {
 
   return {
     setTools,
+    async listFrames(tabId) {
+      // The poll also drops iframes that went away since they last reported.
+      await refreshTools(tabId);
+      return [...(framesByTab.get(tabId) ?? [])]
+        .toSorted(([a], [b]) => a - b)
+        .map(([frameId, { origin, tools }]) => (origin === undefined ? { frameId, tools } : { frameId, origin, tools }));
+    },
     startRun,
     resumeRun: (tabId, state) => drive(tabId, state.macro.id, async () => state),
     stopRun(tabId) {

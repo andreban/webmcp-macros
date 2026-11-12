@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Macro } from "../macro/types";
 import { flightSearchMacro, rocketLauncherMacro } from "../samples";
-import { patternError, SitesPanel, toolInfos, triggerStatus } from "./SitesPanel";
+import { pageFromFrames, patternError, SitesPanel, toolInfos, triggerStatus, withFrameTools } from "./SitesPanel";
 import { createEditorState, type EditorAction, editorReducer } from "./state";
 
 const rocketUrl = "https://bandarra.me/apps/webmcp-rocketlauncher/?mode=dynamic";
@@ -57,6 +57,36 @@ describe("toolInfos", () => {
       ]),
     ).toEqual([{ name: "a" }, { name: "c", description: "x", inputSchema: schema }, { name: "d" }]);
     expect(toolInfos({ name: "a" })).toEqual([]);
+  });
+});
+
+describe("pageFromFrames and withFrameTools", () => {
+  const url = "http://localhost/frames";
+  const reply = [
+    { frameId: 0, origin: "http://localhost", tools: [{ name: "whoami" }] },
+    { frameId: 5, origin: "http://b.test", tools: [{ name: "b" }] },
+    { frameId: 2, origin: "http://a.test", tools: [{ name: "a", inputSchema: [] }] },
+    { frameId: 4, tools: [{ name: "unnamed" }] },
+  ];
+
+  it("keeps the top frame's tools apart and lists iframes with their origin, in frame order", () => {
+    expect(pageFromFrames(url, reply)).toEqual({
+      url,
+      tools: [{ name: "whoami" }],
+      frames: [
+        { frameId: 2, origin: "http://a.test", tools: [{ name: "a" }] },
+        { frameId: 5, origin: "http://b.test", tools: [{ name: "b" }] },
+      ],
+    });
+    expect(pageFromFrames(url, { not: "a list" })).toEqual({ url, tools: [] });
+  });
+
+  it("applies one frame's report and drops an iframe that reports no tools", () => {
+    const page = pageFromFrames(url, reply);
+    expect(withFrameTools(page, 0, "http://localhost", [{ name: "x" }]).tools).toEqual([{ name: "x" }]);
+    expect(withFrameTools(page, 0, "http://localhost", [{ name: "x" }]).frames).toEqual(page.frames);
+    expect(withFrameTools(page, 2, "http://a.test", []).frames?.map((frame) => frame.frameId)).toEqual([5]);
+    expect(withFrameTools(page, 3, "http://c.test", [{ name: "c" }]).frames?.map((frame) => frame.frameId)).toEqual([2, 3, 5]);
   });
 });
 

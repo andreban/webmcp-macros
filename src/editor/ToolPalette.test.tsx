@@ -45,6 +45,66 @@ describe("paletteTools", () => {
   });
 });
 
+describe("iframe tools", () => {
+  const inner = "http://127.0.0.1:4173";
+  const framed: LivePage = {
+    url: "http://localhost:4173/frames",
+    tools: [{ name: "whoami" }],
+    frames: [
+      { frameId: 3, origin: inner, tools: [{ name: "whoami" }, { name: "stamp_inner" }] },
+      // A second frame of the same origin is merged into the first.
+      { frameId: 4, origin: inner, tools: [{ name: "stamp_inner" }, { name: "only_in_4" }] },
+    ],
+  };
+  const macro = createNewMacro(framed.url, "m1");
+
+  it("lists iframe tools under their origin and records frameOrigin only for a shared name", () => {
+    expect(paletteTools(macro, framed, "main")).toEqual([
+      { name: "whoami", live: true },
+      { name: "whoami", live: true, origin: inner, frameOrigin: inner },
+      { name: "stamp_inner", live: true, origin: inner },
+      { name: "only_in_4", live: true, origin: inner },
+    ]);
+  });
+
+  it("records frameOrigin when two iframe origins share a name, and never for the top frame", () => {
+    const page: LivePage = {
+      url: framed.url,
+      tools: [],
+      frames: [
+        { frameId: 3, origin: "https://a.test", tools: [{ name: "save" }] },
+        { frameId: 4, origin: "https://b.test", tools: [{ name: "save" }] },
+      ],
+    };
+    expect(paletteTools(macro, page, "main").map((tool) => tool.frameOrigin)).toEqual(["https://a.test", "https://b.test"]);
+  });
+
+  it("inserts a shared iframe tool as its own alias with frameOrigin, and reuses that alias later", () => {
+    const [top, shared, single] = paletteTools(macro, framed, "main");
+    if (!top || !shared || !single) throw new Error("missing tools");
+    const first = toolCall(macro, top, "main");
+    expect(first.tools).toEqual({ whoami: { site: "main", name: "whoami" } });
+    const withTop: Macro = { ...macro, tools: first.tools };
+    const second = toolCall(withTop, shared, "main");
+    expect(second.tools).toEqual({ whoami2: { site: "main", name: "whoami", frameOrigin: inner } });
+    expect(toolCall(withTop, single, "main").tools).toEqual({ stamp_inner: { site: "main", name: "stamp_inner" } });
+    const both: Macro = { ...withTop, tools: { ...withTop.tools, ...second.tools } };
+    expect(toolCall(both, shared, "main").stmt).toEqual({ op: "call", tool: "whoami2" });
+  });
+
+  it("shows a macro tool for an iframe that is gone under its origin, greyed out", () => {
+    const saved: Macro = { ...macro, tools: { w: { site: "main", name: "whoami", frameOrigin: inner } } };
+    expect(paletteTools(saved, { url: framed.url, tools: [{ name: "whoami" }] }, "main")).toEqual([
+      { name: "whoami", live: true },
+      { name: "whoami", live: false, origin: inner, frameOrigin: inner },
+    ]);
+    expect(paletteTools(saved, framed, "main").filter((tool) => !tool.live)).toEqual([]);
+    const html = renderToStaticMarkup(<ToolPalette macro={macro} page={framed} onPick={() => {}} />);
+    expect(html).toContain(`In an iframe from ${inner}</span><ul aria-label="Tools in an iframe from ${inner}"`);
+    expect(html.indexOf('aria-label="Tools"')).toBeLessThan(html.indexOf("In an iframe"));
+  });
+});
+
 describe("aliasFor", () => {
   it("makes an identifier that no other alias uses", () => {
     expect(aliasFor("load_fuel", [])).toBe("load_fuel");
