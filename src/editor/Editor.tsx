@@ -5,6 +5,7 @@ import { loadMacros, saveMacro } from "../storage";
 import { InputsPanel } from "./InputsPanel";
 import { createNewMacro, type EditorParams, editorPath, historyShortcut, isDirty } from "./page";
 import { ProgramEditor } from "./ProgramEditor";
+import { type ObservedSchemas, observedSchemas } from "./resultFields";
 import { RunBar } from "./RunBar";
 import { type LivePage, SitesPanel, triggerStatus, useTabPage } from "./SitesPanel";
 import { createEditorState, type EditorAction, editorReducer, type EditorState } from "./state";
@@ -62,6 +63,13 @@ function EditorSession({ initial, isNew, tabId }: { initial: Macro; isNew: boole
   const [error, setError] = useState("");
   const dirty = isDirty(state.macro, baseline);
   const { start, stop, clear, ...trace } = useEditorRun(tabId);
+  // Result shapes from runs, kept after the run bar is dismissed so field suggestions stay.
+  const [observed, setObserved] = useState<ObservedSchemas>({});
+  const [seenCalls, setSeenCalls] = useState(trace.calls);
+  if (trace.calls !== seenCalls) {
+    setSeenCalls(trace.calls);
+    if (trace.calls.length > 0) setObserved({ ...observed, ...observedSchemas(trace.calls) });
+  }
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -120,6 +128,7 @@ function EditorSession({ initial, isNew, tabId }: { initial: Macro; isNew: boole
         />
       }
       running={trace.at}
+      observed={observed}
     />
   );
 }
@@ -138,10 +147,12 @@ export interface EditorViewProps {
   runBar?: ReactNode;
   /** The statement a run is executing, highlighted in the program. */
   running?: NodePath;
+  /** Result shapes seen in runs, for field suggestions; never saved into the macro. */
+  observed?: ObservedSchemas;
 }
 
 /** The editor's layout, from state passed in, so it renders without `chrome.*`. */
-export function EditorView({ state, dispatch, status, canSave, onSave, tabId, runBar, running }: EditorViewProps) {
+export function EditorView({ state, dispatch, status, canSave, onSave, tabId, runBar, running, observed }: EditorViewProps) {
   const { macro } = state;
   const page = useTabPage(tabId);
   return (
@@ -190,7 +201,7 @@ export function EditorView({ state, dispatch, status, canSave, onSave, tabId, ru
         <SitesPanel macro={macro} dispatch={dispatch} page={page} />
       </details>
       {runBar}
-      <ProgramEditor macro={macro} dispatch={dispatch} page={page} running={running} />
+      <ProgramEditor macro={macro} dispatch={dispatch} page={page} running={running} observed={observed} />
     </main>
   );
 }

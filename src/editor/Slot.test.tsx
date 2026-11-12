@@ -119,7 +119,7 @@ describe("Slot", () => {
     expect(html).toContain('<option value="trajectory">trajectory (required)</option>');
     expect(html).toContain('<option value="crew">crew</option>');
     expect(html).not.toContain('<option value="auth_code">');
-    expect(html).toContain('aria-label="other field name"');
+    expect(html).not.toContain('aria-label="new field name"'); // the schema's fields are offered instead
   });
 
   it("keeps free-form arguments without a schema, and for objects and procedures", () => {
@@ -174,7 +174,7 @@ describe("StmtSlot", () => {
     expect(html).toMatch(/<option value="look" selected="">look_around<\/option>/);
     expect(html).toContain('aria-label="new field name"'); // absent args edit as none
     expect(html).toMatch(/ as <input[^>]*aria-label="variable"[^>]* value="seen"/);
-    expect(html).toContain('aria-label="Remove result name"');
+    expect(html).toContain('aria-label="Remove save result"');
     expect(renderStmt({ op: "wait", ms: 250 })).toMatch(/aria-label="milliseconds"[^>]* value="250"/);
   });
 
@@ -190,7 +190,9 @@ describe("StmtSlot", () => {
   it("offers to add an absent optional field, and only an optional one", () => {
     const html = renderStmt({ op: "waitForTool", tool: "look" });
     expect(html).toContain(">+ time limit</button>");
-    expect(renderStmt({ op: "popFront", var: "queue" })).toContain(">+ result name</button>");
+    expect(renderStmt({ op: "popFront", var: "queue" })).toContain(">+ save result</button>");
+    // A call's result is named after its tool, so the first click gives a meaningful name.
+    expect(renderStmt({ op: "call", tool: "look" })).toContain(">+ save result</button>");
     expect(renderStmt({ op: "stop" })).toContain('aria-label="Add message"');
     expect(renderStmt({ op: "return" })).toContain('aria-label="Add value"');
     expect(renderStmt({ op: "set", var: "x", value: { lit: 1 } })).not.toContain("Remove");

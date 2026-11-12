@@ -7,6 +7,7 @@ import { type Slot, statements } from "./registry";
 import type { LivePage } from "./SitesPanel";
 import { StmtSlot } from "./Slot";
 import { type EditorAction, getNode, moveTarget, type Path } from "./state";
+import type { ObservedSchemas } from "./resultFields";
 import { PageToolsContext, pageSite, paletteTools } from "./ToolPalette";
 
 interface View {
@@ -30,12 +31,15 @@ export function ProgramEditor({
   dispatch,
   page,
   running,
+  observed,
 }: {
   macro: Macro;
   dispatch: Dispatch<EditorAction>;
   page?: LivePage;
   /** The statement a run is executing, highlighted. */
   running?: Path;
+  /** Result shapes from the last runs, so fields are offered for tools without an outputSchema. */
+  observed?: ObservedSchemas;
 }) {
   const [focus, setFocus] = useState<Path>(["program", 0]);
   // Set by keyboard and palette actions only, so a re-render never steals focus.
@@ -118,7 +122,7 @@ export function ProgramEditor({
 
   const view: View = { macro, dispatch, running: running && pathKey(running), tabStop: pathKey(current), hintId, drag };
   const site = pageSite(macro, page?.url);
-  const pageTools = page ? { tools: paletteTools(macro, page, site), site } : undefined;
+  const pageTools = page ? { tools: paletteTools(macro, page, site), site, observed } : undefined;
   return (
     <PageToolsContext value={pageTools}>
       <div className="wmm-program workspace">

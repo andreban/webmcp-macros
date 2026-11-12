@@ -1,9 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { MACRO_VERSION, isMacro, type Expr, type Json, type Macro } from "../macro/types";
-import { ExprPicker, formatLiteral, type LiteralType, parseLiteral, pickerChoices, variableNames } from "./ExprPicker";
+import { ExprPicker, formatLiteral, type LiteralType, parseLiteral, pickerChoices, resultName, variableNames } from "./ExprPicker";
+import { observedSchemas } from "./resultFields";
 import { exprKind, expressions } from "./registry";
+import { createNewMacro } from "./page";
+import { type LivePage, toolInfos } from "./SitesPanel";
 import { createEditorState, editorReducer } from "./state";
+import { pageSite, paletteTools, toolCall } from "./ToolPalette";
 
 const macro: Macro = {
   wmm: MACRO_VERSION,
@@ -67,6 +71,17 @@ describe("variableNames", () => {
   });
 });
 
+describe("resultName", () => {
+  it("names a result after its tool without the verb, unique in the program", () => {
+    const tools = (name: string): Macro => ({ ...macro, tools: { t: { site: "app", name } } });
+    expect(resultName(tools("open_letter"), "t")).toBe("letter");
+    expect(resultName(tools("build_toy"), "t")).toBe("build_toy");
+    expect(resultName(tools("get_"), "t")).toBe("result");
+    expect(resultName(tools("look-around"), "t")).toBe("look_around");
+    expect(resultName(tools("fetch_view"), "t")).toBe("view2"); // "view" is already saved
+  });
+});
+
 describe("pickerChoices", () => {
   it("offers every expression kind, each of which can fill a slot", () => {
     const choices = pickerChoices(macro, { lit: 1 }, false);
@@ -111,7 +126,15 @@ describe("pickerChoices", () => {
       { label: "view → from", expr: { get: { var: "view" }, path: ["from"] } },
       { label: "view → from.town", expr: { get: { var: "view" }, path: ["from", "town"] } },
     ]);
-    expect(pickerChoices(macro, undefined, false).some((choice) => choice.label.includes("→"))).toBe(false);
+    // Without a schema, a saved result can still be picked and its field typed.
+    expect(pickerChoices(macro, undefined, false)).toContainEqual({ label: "view → field…", expr: { get: { var: "view" }, path: [] } });
+  });
+
+  it("offers fields seen in a run when the tool declares no outputSchema", () => {
+    const observed = observedSchemas([{ tool: "look_around", result: { wishes: [{ toy: "kite" }] } }]);
+    const labels = pickerChoices(macro, undefined, false, observed).map((choice) => choice.label);
+    expect(labels).toContain("view → wishes");
+    expect(labels).not.toContain("view → field…");
   });
 
   it("offers to clear only an optional slot that holds a value", () => {
@@ -131,5 +154,22 @@ describe("ExprPicker", () => {
     expect(html).toMatch(/^<select[^>]*aria-label="Choose condition"[^>]*size="8"/);
     expect(html).toContain(">Input: Auth code</option>");
     expect(html).toContain(">Result of a tool</option>");
+  });
+});
+
+describe("a page tool's outputSchema, end to end", () => {
+  it("offers a saved result's list field to a for each inserted after the call", () => {
+    const wish = { type: "object", properties: { toy: { type: "string" }, colour: { type: "string" } } };
+    const outputSchema = { type: "object", properties: { child: { type: "string" }, wishes: { type: "array", items: wish } } };
+    const page: LivePage = { url: "https://example.com/santa", tools: toolInfos([{ name: "open_letter", inputSchema: { type: "object" }, outputSchema }]) };
+    let state = createEditorState(createNewMacro(page.url, "m"));
+    const site = pageSite(state.macro, page.url);
+    const [tool] = paletteTools(state.macro, page, site);
+    if (!tool) throw new Error("open_letter is not offered");
+    const { stmt, tools } = toolCall(state.macro, tool, site);
+    if (stmt.op !== "call") throw new Error("not a call");
+    state = editorReducer(state, { type: "insertStmt", at: ["program", 0], stmt: { ...stmt, saveAs: resultName(state.macro, stmt.tool) }, tools });
+    const labels = pickerChoices(state.macro, undefined, false).map((choice) => choice.label);
+    expect(labels).toContain("letter → wishes");
   });
 });
