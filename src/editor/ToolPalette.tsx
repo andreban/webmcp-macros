@@ -10,6 +10,7 @@ export interface PaletteTool {
   name: string;
   description?: string;
   inputSchema?: JsonSchema;
+  outputSchema?: JsonSchema;
   /** Registered on the tab now. Absent tools stay insertable from the macro's snapshot. */
   live: boolean;
   /** The iframe origin the tool is listed under; absent for the top frame. */
@@ -46,11 +47,12 @@ export function paletteTools(macro: Macro, page: LivePage | undefined, site: str
   }
   // A macro tool is on the page when its name is, in the frame its `frameOrigin` names if it has one.
   const topOrigin = page && URL.canParse(page.url) ? new URL(page.url).origin : undefined;
-  for (const { site: toolSite, name, inputSchema, frameOrigin } of Object.values(macro.tools)) {
+  for (const { site: toolSite, name, inputSchema, outputSchema, frameOrigin } of Object.values(macro.tools)) {
     const known = (tool: PaletteTool) => tool.name === name && (frameOrigin === undefined || frameOrigin === (tool.origin ?? topOrigin));
     if (toolSite !== site || shown.some(known)) continue;
     const entry: PaletteTool = { name, live: false };
     if (inputSchema) entry.inputSchema = inputSchema;
+    if (outputSchema) entry.outputSchema = outputSchema;
     if (frameOrigin !== undefined) {
       entry.frameOrigin = frameOrigin;
       if (frameOrigin !== topOrigin) entry.origin = frameOrigin;
@@ -70,8 +72,10 @@ export function aliasFor(name: string, taken: readonly string[]): string {
 
 /**
  * The alias for `tool` and the `Macro.tools` entry to merge: an alias already
- * pointing at the tool is reused, and the schema snapshot and its hash are
- * refreshed from the page, so a later change on the site can be detected.
+ * pointing at the tool is reused, and the schema snapshots and the input
+ * schema's hash are refreshed from the page, so a later change on the site
+ * can be detected. Only the input schema is hashed: a changed result does not
+ * break the calls a macro makes.
  */
 export function toolEntry(macro: Macro, tool: PaletteTool, site: string): { alias: string; tools: Record<string, MacroTool> } {
   const existing = Object.entries(macro.tools).find(
@@ -83,6 +87,7 @@ export function toolEntry(macro: Macro, tool: PaletteTool, site: string): { alia
     entry.inputSchema = tool.inputSchema;
     entry.schemaHash = schemaHash(tool.inputSchema);
   }
+  if (tool.outputSchema) entry.outputSchema = tool.outputSchema;
   if (tool.frameOrigin !== undefined) entry.frameOrigin = tool.frameOrigin;
   return { alias, tools: { [alias]: entry } };
 }

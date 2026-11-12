@@ -34,6 +34,11 @@ export interface MacroTool {
   /** The tool's inputSchema as the editor last saw it, so the macro can be edited away from the page. */
   inputSchema?: JsonSchema;
   /**
+   * The tool's outputSchema as the editor last saw it, when the page declares
+   * one, so the editor can offer the fields of a saved result.
+   */
+  outputSchema?: JsonSchema;
+  /**
    * Origin of the frame (top page or iframe) that registers the tool, for
    * when frames register equal names. Without it, the top frame wins.
    */
@@ -154,6 +159,8 @@ export interface ToolInfo {
   name: string;
   description?: string;
   inputSchema?: JsonSchema;
+  /** Declared by the page since outputSchema joined the WebMCP spec; most tools have none. */
+  outputSchema?: JsonSchema;
   annotations?: Record<string, boolean>;
 }
 
