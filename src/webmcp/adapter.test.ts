@@ -104,6 +104,32 @@ describe("executeTool", () => {
     expect(await executeTool("go", {})).toEqual(expected);
   });
 
+  it.each([
+    ["a list as JSON text", { content: [{ type: "text", text: '[{"price":120}]' }] }, [{ price: 120 }]],
+    ["plain text", { content: [{ type: "text", text: "Saved." }] }, "Saved."],
+    ["several text blocks, joined", { content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] }, "a\nb"],
+    ["no content", { content: [] }, null],
+    ["structuredContent, which wins", { content: [{ type: "text", text: "2 hotels" }], structuredContent: { count: 2 } }, { count: 2 }],
+    ["an explicit success flag", { content: [{ type: "text", text: "1" }], isError: false }, 1],
+  ])("unwraps an MCP tool result with %s", async (_label, result, expected) => {
+    context.run = () => JSON.stringify(result);
+    expect(await executeTool("go", {})).toEqual(expected);
+  });
+
+  it.each([
+    ["an image block", { content: [{ type: "image", data: "AA==", mimeType: "image/png" }] }],
+    ["other fields beside content", { content: [{ type: "text", text: "1" }], page: 2 }],
+    ["content that is not a list", { content: "hello" }],
+  ])("leaves an object with %s as it is", async (_label, result) => {
+    context.run = () => result;
+    expect(await executeTool("go", {})).toEqual(result);
+  });
+
+  it("throws the text of an MCP error result", async () => {
+    context.run = () => ({ content: [{ type: "text", text: "No flights loaded." }], isError: true });
+    await expect(executeTool("go", {})).rejects.toThrow("No flights loaded.");
+  });
+
   it("rejects a result JSON cannot represent", async () => {
     context.run = () => ({ big: 1n });
     await expect(executeTool("go", {})).rejects.toThrow(/not JSON/);
