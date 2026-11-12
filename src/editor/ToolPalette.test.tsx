@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { schemaHash } from "../macro/compat";
 import type { Macro } from "../macro/types";
 import { rocketLauncherMacro } from "../samples";
 import { createNewMacro } from "./page";
@@ -57,12 +58,12 @@ describe("toolCall", () => {
   const macro = createNewMacro(page.url, "m1");
   const live = paletteTools(macro, page, "main");
 
-  it("adds the tool with a schema snapshot and fills required arguments", () => {
+  it("adds the tool with a schema snapshot and its hash, and fills required arguments", () => {
     const fuel = live.find((tool) => tool.name === "load_fuel");
     if (!fuel) throw new Error("missing tool");
     expect(toolCall(macro, fuel, "main")).toEqual({
       stmt: { op: "call", tool: "load_fuel", args: { amount: { lit: 0 }, oxidizer_ratio: { lit: 0 } } },
-      tools: { load_fuel: { site: "main", name: "load_fuel", inputSchema: fuelSchema } },
+      tools: { load_fuel: { site: "main", name: "load_fuel", inputSchema: fuelSchema, schemaHash: schemaHash(fuelSchema) } },
     });
   });
 
@@ -77,6 +78,12 @@ describe("toolCall", () => {
     expect(next.macro.program).toEqual([fuel.stmt]);
     expect(next.macro.tools).toEqual(fuel.tools);
     expect(editorReducer(next, { type: "undo" }).macro).toBe(macro);
+  });
+
+  it("refreshes a stale hash from the page's schema", () => {
+    const stale: Macro = { ...macro, tools: { fuel: { site: "main", name: "load_fuel", schemaHash: "00000000" } } };
+    const fuel = toolCall(stale, { name: "load_fuel", inputSchema: fuelSchema, live: true }, "main");
+    expect(fuel.tools.fuel?.schemaHash).toBe(schemaHash(fuelSchema));
   });
 });
 

@@ -39,6 +39,7 @@ function render(view: PageView, overrides: Partial<ThisPageViewProps> = {}): str
       onRun={noop}
       onSubmit={noop}
       onCancel={noop}
+      onUpdate={noop}
       onStop={noop}
       onDismiss={noop}
       {...overrides}
@@ -68,6 +69,13 @@ describe("ThisPageView", () => {
     expect(html).toContain("<summary>2 WebMCP tools on this page</summary>");
     expect(html).toContain('<code>get_page_state</code><p class="muted">Reads the console.</p>');
     expect(html).toContain("<code>calculate_fuel</code></li>");
+  });
+
+  it("offers needs update instead of Run for a macro the page's tools no longer fit", () => {
+    const tools = [{ name: "get_page_state" }, { name: "calculate_fuel", inputSchema: { type: "object", properties: {} } }];
+    const html = render({ kind: "ready", tools, matches: [rocketLauncherMacro] });
+    expect(html).toContain('<button type="button" class="secondary">Needs update</button>');
+    expect(html).not.toContain(">Run</button>");
   });
 
   it("keeps an empty status region before any run", () => {
