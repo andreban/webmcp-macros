@@ -1,6 +1,7 @@
 // Editor state: the macro JSON plus undo/redo history, changed only through
 // `editorReducer`. Nodes are addressed by paths, so there is no second model.
 import type { Expr, Macro, MacroInput, MacroTool, Stmt } from "../macro/types";
+import { defaultTrigger } from "./defaultTrigger";
 
 /**
  * From the macro root: `["program", 2, "then", 0]` is a statement, `["program", 0, "cond"]`
@@ -316,9 +317,23 @@ function inputAction(macro: Macro, action: InputAction): Macro | undefined {
   }
 }
 
+const sameTrigger = (a: Macro["trigger"], b: Macro["trigger"]) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Keeps the trigger in step with the program while it is the proposed one, so
+ * an author who never opens the trigger panel still gets a macro offered when
+ * its first tools are there. A trigger edited by hand is left alone from then on.
+ */
+function followTrigger(before: Macro, after: Macro): Macro {
+  if (after.trigger !== before.trigger || !sameTrigger(before.trigger, defaultTrigger(before))) return after;
+  const trigger = defaultTrigger(after);
+  return sameTrigger(trigger, after.trigger) ? after : { ...after, trigger };
+}
+
 // An edit that does nothing returns the same state, so it adds no history.
-function commit(state: EditorState, next: Macro | undefined): EditorState {
-  if (!next || next === state.macro) return state;
+function commit(state: EditorState, edited: Macro | undefined): EditorState {
+  if (!edited || edited === state.macro) return state;
+  const next = followTrigger(state.macro, edited);
   const past = [...state.past, state.macro];
   const kept = past.slice(Math.max(0, past.length - state.historyLimit));
   return { ...state, macro: next, past: kept, future: [] };

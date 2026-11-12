@@ -6,7 +6,7 @@ import { InputsPanel } from "./InputsPanel";
 import { createNewMacro, type EditorParams, editorPath, historyShortcut, isDirty } from "./page";
 import { ProgramEditor } from "./ProgramEditor";
 import { RunBar } from "./RunBar";
-import { SitesPanel, useTabPage } from "./SitesPanel";
+import { type LivePage, SitesPanel, triggerStatus, useTabPage } from "./SitesPanel";
 import { createEditorState, type EditorAction, editorReducer, type EditorState } from "./state";
 import { useEditorRun } from "./useEditorRun";
 
@@ -175,21 +175,32 @@ export function EditorView({ state, dispatch, status, canSave, onSave, tabId, ru
         </button>
       </header>
       <MetaField label="Name" value={macro.name} onCommit={(name) => dispatch({ type: "setMeta", meta: { name } })} />
-      <MetaField
-        label="Description"
-        multiline
-        value={macro.description ?? ""}
-        onCommit={(text) => dispatch({ type: "setMeta", meta: { description: text || undefined } })}
-      />
-      <InputsPanel macro={macro} dispatch={dispatch} />
-      <SitesPanel macro={macro} dispatch={dispatch} page={page} />
+      {/* Settings are set once and rarely revisited, so they fold away and leave the program in view. */}
+      <details className="settings">
+        <summary>
+          Macro settings <span className="muted">· {settingsSummary(macro, page)}</span>
+        </summary>
+        <MetaField
+          label="Description"
+          multiline
+          value={macro.description ?? ""}
+          onCommit={(text) => dispatch({ type: "setMeta", meta: { description: text || undefined } })}
+        />
+        <InputsPanel macro={macro} dispatch={dispatch} />
+        <SitesPanel macro={macro} dispatch={dispatch} page={page} />
+      </details>
       {runBar}
-      <section aria-labelledby="program-heading">
-        <h2 id="program-heading">Program</h2>
-        <ProgramEditor macro={macro} dispatch={dispatch} page={page} running={running} />
-      </section>
+      <ProgramEditor macro={macro} dispatch={dispatch} page={page} running={running} />
     </main>
   );
+}
+
+/** The settings' one-line summary: the inputs, then whether the trigger holds on the tab. */
+export function settingsSummary(macro: Macro, page: LivePage | undefined): string {
+  const count = macro.inputs?.length ?? 0;
+  const inputs = count === 0 ? "No inputs" : count === 1 ? "1 input" : `${count} inputs`;
+  const live = page && { url: page.url, tools: page.tools.map((tool) => tool.name) };
+  return `${inputs}. ${triggerStatus(macro, live)}`;
 }
 
 /**

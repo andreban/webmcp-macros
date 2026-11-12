@@ -1,4 +1,4 @@
-.editor { max-width: 760px; margin: 0 auto; }
+.editor { max-width: 1200px; margin: 0 auto; }
 .toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
 .toolbar > h1 { margin: 0; }
 .toolbar > .status { margin: 0 auto 0 12px; color: var(--muted); }
@@ -6,15 +6,39 @@
 .field > input { font: inherit; font-weight: normal; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
 .field > textarea { font-weight: normal; }
 .wmm-program [data-path]:focus-visible { outline: 2px solid var(--wmm-accent); outline-offset: 1px; }
-.wmm-empty { padding: 2px 8px; border: 1px dashed var(--wmm-border); border-radius: 6px; color: var(--muted); font-style: italic; }
-.palette { display: grid; gap: 4px; margin-top: 12px; font-weight: 600; }
+.wmm-empty { position: relative; padding: 2px 8px; border: 1px dashed var(--wmm-border); border-radius: 4px; color: var(--muted); font-style: italic; }
+.palette { display: grid; gap: 6px; font-weight: 600; }
 .palette > input { font: inherit; font-weight: normal; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
 .palette-options { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; font-weight: normal; }
 .palette-options > li { cursor: pointer; }
 .palette-options > [aria-selected="true"] { outline: 2px solid var(--wmm-accent); }
-.tool-palette { display: grid; gap: 4px; margin-top: 12px; font-weight: 600; }
-.tool-palette .wmm-block { font: inherit; font-weight: normal; color: inherit; text-align: start; cursor: pointer; }
-.tool-palette .wmm-tool--absent { opacity: 0.6; border-style: dashed; }
+.palette .wmm-tool--absent { opacity: 0.75; border-style: dashed; }
+.palette-options .wmm-block .muted { color: inherit; font-style: italic; }
+/* Fields and buttons inside a block look like Scratch's rounded inputs, not form controls. */
+.wmm-block select, .wmm-block .wmm-slot-field { border-radius: 10px; border: 1px solid rgb(0 0 0 / 0.2); background: var(--wmm-bg); color: var(--wmm-fg); padding: 0 6px; }
+.wmm-block button { border-radius: 10px; border-color: transparent; background: rgb(0 0 0 / 0.3); color: var(--wmm-on-block); padding: 0 6px; }
+.wmm-hat { display: inline-block; padding: 8px 14px 6px; border-radius: 18px 18px 4px 4px; background: var(--wmm-control); color: var(--wmm-on-block); font-weight: 700; }
+/* The settings fold away; the program and its palette are the page. */
+.settings { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
+.settings > summary { font-weight: 600; }
+.settings[open] > summary { margin-bottom: 8px; }
+.workspace { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.palette-pane { position: sticky; top: 8px; max-height: calc(100dvh - 16px); overflow: auto; padding-right: 4px; }
+.program-pane > h2 { margin-top: 0; }
+.palette-groups { display: grid; gap: 10px; }
+.palette-group { display: grid; gap: 4px; }
+.palette-heading { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.palette-heading::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; border: 1px solid var(--wmm-border); background: var(--wmm-call); }
+.palette-group--control .palette-heading::before { background: var(--wmm-control); }
+.palette-group--data .palette-heading::before { background: var(--wmm-data); }
+.palette-group--user .palette-heading::before { background: var(--wmm-user); }
+/* A wide left edge on every block, coloured on the one new blocks go after, so marking it does not shift the layout. */
+.wmm-program [data-path] { border-left-width: 4px; }
+.wmm-program [data-path][tabindex="0"] { border-left-color: var(--wmm-fg); }
+@media (max-width: 720px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .palette-pane { position: static; max-height: none; }
+}
 .wmm-slot { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; position: relative; }
 .wmm-slot-field { font: inherit; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--fg); }
 .wmm-slot-field[aria-invalid] { border-color: var(--danger); }
@@ -28,6 +52,20 @@
 /* An outline as well as the colour, so the highlight does not rely on colour alone. */
 .wmm-block--running { outline: 2px solid var(--wmm-accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--wmm-accent) 25%, transparent); }
 .wmm-program [draggable="true"] { cursor: grab; }
-.wmm-program [data-drop="before"] { box-shadow: 0 -3px 0 var(--wmm-accent); }
-.wmm-program [data-drop="after"] { box-shadow: 0 3px 0 var(--wmm-accent); }
-.wmm-program [data-drop="into"] { outline: 2px dashed var(--wmm-accent); }
+/* Where a dragged block lands: a ghost slot over the gap, drawn without moving any block under the pointer. */
+.wmm-program [data-drop]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 14px;
+  border: 2px dashed var(--wmm-accent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--wmm-accent) 30%, var(--wmm-bg));
+  z-index: 2;
+  pointer-events: none;
+}
+.wmm-program [data-drop="before"]::before { top: -9px; }
+.wmm-program [data-drop="after"]::before { bottom: -9px; }
+.wmm-program [data-drop="into"]::before { inset: 0; height: auto; }
+.wmm-hat + .wmm-blocks { margin-top: 0; }

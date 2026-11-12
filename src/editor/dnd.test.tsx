@@ -43,7 +43,7 @@ describe("dropAction", () => {
   });
 
   it("inserts a new block from the palette", () => {
-    const action = dropAction(macro, { kind: "palette", op: "wait" }, ["program", 2, "body", 0]);
+    const action = dropAction(macro, { kind: "palette", insert: { stmt: { op: "wait", ms: 1000 } } }, ["program", 2, "body", 0]);
     expect(action?.type).toBe("insertStmt");
     expect(apply(action)?.[2]).toEqual({ op: "while", cond: { lit: true }, body: [{ op: "wait", ms: 1000 }] });
   });

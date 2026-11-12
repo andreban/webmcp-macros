@@ -51,6 +51,7 @@ function TabSection({ tab, macros }: { tab: ActiveTab; macros: readonly Macro[] 
       }}
       onCancel={() => setFormFor(null)}
       onUpdate={(macro) => void openEditor(macro.id).catch(() => {})}
+      onNewMacro={() => void openEditor().catch(() => {})}
       onStop={stop}
       onDismiss={clear}
     />
@@ -67,12 +68,15 @@ export interface ThisPageViewProps {
   onCancel(): void;
   /** Opens a macro that no longer fits the page's tools in the editor. */
   onUpdate(macro: Macro): void;
+  /** Opens the editor on a new macro for this page, so its tools are there to build with. */
+  onNewMacro(): void;
   onStop(): void;
   onDismiss(): void;
 }
 
 /** The section itself, with every piece of state passed in. */
-export function ThisPageView({ view, run, formMacro, onRun, onSubmit, onCancel, onUpdate, onStop, onDismiss }: ThisPageViewProps) {
+export function ThisPageView(props: ThisPageViewProps) {
+  const { view, run, formMacro, onRun, onSubmit, onCancel, onUpdate, onNewMacro, onStop, onDismiss } = props;
   const running = run !== null && !run.result;
   return (
     <section aria-labelledby="page-heading">
@@ -128,6 +132,11 @@ export function ThisPageView({ view, run, formMacro, onRun, onSubmit, onCancel, 
               })}
             </ul>
           )}
+          <div className="actions">
+            <button type="button" className={view.tools.length > 0 ? undefined : "secondary"} onClick={onNewMacro}>
+              New macro for this page
+            </button>
+          </div>
           <details>
             <summary>
               {view.tools.length === 0

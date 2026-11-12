@@ -40,6 +40,7 @@ function render(view: PageView, overrides: Partial<ThisPageViewProps> = {}): str
       onSubmit={noop}
       onCancel={noop}
       onUpdate={noop}
+      onNewMacro={noop}
       onStop={noop}
       onDismiss={noop}
       {...overrides}
@@ -50,6 +51,13 @@ function render(view: PageView, overrides: Partial<ThisPageViewProps> = {}): str
 const ready: PageView = { kind: "ready", tools: rocketTools, matches: [rocketLauncherMacro, noInputs] };
 
 describe("ThisPageView", () => {
+  it("offers a new macro only on a page macros can run on, as the main action when it has tools", () => {
+    expect(render(ready)).toContain('<button type="button">New macro for this page</button>');
+    const bare: PageView = { kind: "ready", tools: [], matches: [] };
+    expect(render(bare)).toContain('<button type="button" class="secondary">New macro for this page</button>');
+    expect(render({ kind: "unreachable" })).not.toContain("New macro");
+  });
+
   it("says when there is no tab or the page cannot run macros", () => {
     expect(render({ kind: "no-tab" })).toContain("No active tab.");
     const html = render({ kind: "unreachable" });
