@@ -7,7 +7,7 @@ import { createDefault, type Slot, type StmtOp, statements } from "./registry";
 import type { LivePage } from "./SitesPanel";
 import { StmtSlot } from "./Slot";
 import { type EditorAction, getNode, moveTarget, type Path } from "./state";
-import { ToolPalette } from "./ToolPalette";
+import { PageToolsContext, pageSite, paletteTools, ToolPalette } from "./ToolPalette";
 
 interface View {
   macro: Macro;
@@ -117,22 +117,26 @@ export function ProgramEditor({
   };
 
   const view: View = { macro, dispatch, running: running && pathKey(running), tabStop: pathKey(current), hintId, drag };
+  const site = pageSite(macro, page?.url);
+  const pageTools = page ? { tools: paletteTools(macro, page, site), site } : undefined;
   return (
-    <div className="wmm-program">
-      <p id={hintId} className="muted">
-        Arrow keys move between blocks, Alt+Up and Alt+Down move a block, Delete removes it, and / inserts after it. Blocks can also be dragged.
-      </p>
-      <div ref={root} onKeyDown={onKeyDown} onFocus={onFocus} onBlur={onBlur}>
-        <Body view={view} body={macro.program} at={["program"]} />
+    <PageToolsContext value={pageTools}>
+      <div className="wmm-program">
+        <p id={hintId} className="muted">
+          Arrow keys move between blocks, Alt+Up and Alt+Down move a block, Delete removes it, and / inserts after it. Blocks can also be dragged.
+        </p>
+        <div ref={root} onKeyDown={onKeyDown} onFocus={onFocus} onBlur={onBlur}>
+          <Body view={view} body={macro.program} at={["program"]} />
+        </div>
+        <Palette
+          inputRef={paletteInput}
+          onPick={(op: StmtOp) => insert(createDefault(op))}
+          onCancel={() => go(current)}
+          itemProps={drag.paletteItem}
+        />
+        <ToolPalette macro={macro} page={page} onPick={({ stmt, tools }) => insert(stmt, tools)} />
       </div>
-      <Palette
-        inputRef={paletteInput}
-        onPick={(op: StmtOp) => insert(createDefault(op))}
-        onCancel={() => go(current)}
-        itemProps={drag.paletteItem}
-      />
-      <ToolPalette macro={macro} page={page} onPick={({ stmt, tools }) => insert(stmt, tools)} />
-    </div>
+    </PageToolsContext>
   );
 }
 

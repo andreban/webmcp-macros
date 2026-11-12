@@ -1,9 +1,10 @@
-import { type Dispatch, Fragment, type ReactNode, useId, useRef, useState } from "react";
-import type { BinaryOp, Expr, Macro, Stmt } from "../macro/types";
+import { type Dispatch, Fragment, type ReactNode, useContext, useId, useRef, useState } from "react";
+import type { BinaryOp, Expr, Macro, MacroTool, Stmt } from "../macro/types";
 import { ExprPicker, formatLiteral, type LiteralType, parseLiteral, variableNames } from "./ExprPicker";
 import { type Slot as SlotDef, type SlotValue, type SlotValues, expressions, exprKind, readSlot } from "./registry";
-import { type ArgSlot, literalType, missingArgs, newArg, toolArgSlots } from "./schemaSlots";
+import { type ArgSlot, literalType, missingArgs, newArg, requiredArgs, schemaSlots, toolArgSlots } from "./schemaSlots";
 import { type EditorAction, isOptionalSlot, type Path } from "./state";
+import { PageToolsContext, toolEntry } from "./ToolPalette";
 
 export interface SlotProps {
   macro: Macro;
@@ -82,8 +83,8 @@ function ExprEditor({ macro, path, expr, dispatch, type }: EditorProps) {
     if (!slot) return null;
     // `SlotOf` admits a slot only for a field holding its slot type's values, so
     // writing a value of that type keeps `expr` the same variant.
-    const update = (value: SlotValues[SlotDef["type"]]) =>
-      dispatch({ type: "replaceNode", at: path, node: { ...expr, [part.slot]: value } as Expr });
+    const update: Update = (value, tools) =>
+      dispatch({ type: "replaceNode", at: path, node: { ...expr, [part.slot]: value } as Expr, tools });
     const at = [...path, part.slot];
     return (
       <Fragment key={index}>
@@ -100,9 +101,12 @@ const BIN_OPS: Record<BinaryOp, true> = {
 };
 const isBinOp = (value: string): value is BinaryOp => Object.hasOwn(BIN_OPS, value);
 
+/** Writes a slot's value; `tools` are merged into the macro in the same step (see `replaceNode`). */
+type Update = (value: SlotValues[SlotDef["type"]], tools?: Record<string, MacroTool>) => void;
+
 interface FieldProps extends Omit<EditorProps, "expr"> {
   slot: SlotValue;
-  update: (value: SlotValues[SlotDef["type"]]) => void;
+  update: Update;
   /** For an `args` slot of a tool call: the tool's schema arguments, when the macro saved its schema. */
   schema?: readonly ArgSlot[];
 }
@@ -147,7 +151,7 @@ function Field({ macro, path, slot, dispatch, type, update, schema }: FieldProps
     case "input":
       return <Choose label="input" value={slot.value} options={(macro.inputs ?? []).map((input) => [input.key, input.label])} onChange={update} />;
     case "tool":
-      return <Choose label="tool" value={slot.value} options={Object.entries(macro.tools).map(([alias, tool]) => [alias, tool.name])} onChange={update} />;
+      return <ToolChoose macro={macro} value={slot.value} onChange={update} />;
     case "site":
       return <Choose label="site" value={slot.value} options={Object.keys(macro.sites).map((key) => [key, key])} onChange={update} />;
     case "binOp":
@@ -259,8 +263,13 @@ export function StmtSlot({ macro, at, stmt, part, dispatch, renderBody }: StmtSl
   // `call` without `args` means no arguments, so it edits as an empty record.
   const slot = readSlot(stmt, part) ?? (part.type === "args" ? { type: "args", value: {} } : undefined);
   // As in `ExprEditor`: `SlotOf` ties the slot type to the field's value type.
-  const update = (value: SlotValues[SlotDef["type"]]) =>
-    dispatch({ type: "replaceNode", at, node: { ...stmt, [part.slot]: value } as Stmt });
+  const update: Update = (value, tools) => {
+    const node = { ...stmt, [part.slot]: value } as Stmt;
+    // A call that has no arguments yet gets the newly chosen tool's required ones, as the tool palette's blocks do.
+    const args = node.op === "call" && tools && !node.args ? requiredArgs(schemaSlots(tools[node.tool]?.inputSchema)) : {};
+    if (node.op === "call" && Object.keys(args).length > 0) node.args = args;
+    dispatch({ type: "replaceNode", at, node, tools });
+  };
   const schema = stmt.op === "call" ? toolArgSlots(macro, stmt.tool) : undefined;
   if (part.type === "value") {
     const expr = slot?.type === "value" ? slot.value : undefined;
@@ -294,6 +303,56 @@ export function StmtSlot({ macro, at, stmt, part, dispatch, renderBody }: StmtSl
         </button>
       ) : null}
     </>
+  );
+}
+
+const PAGE_TOOL = "page:";
+
+/**
+ * Picks a tool: one the macro already declares, or one the page registers now,
+ * which is added to the macro with its schema on pick. Without the page's
+ * tools a new macro would have nothing to choose from.
+ */
+function ToolChoose({ macro, value, onChange }: { macro: Macro; value: string; onChange: Update }) {
+  const page = useContext(PageToolsContext);
+  const declared = Object.entries(macro.tools);
+  const fresh = (page?.tools ?? []).filter(
+    (tool) => tool.live && !declared.some(([, known]) => known.site === page?.site && known.name === tool.name && known.frameOrigin === tool.frameOrigin),
+  );
+  const known = declared.some(([alias]) => alias === value);
+  const pick = (chosen: string) => {
+    const tool = chosen.startsWith(PAGE_TOOL) ? fresh[Number(chosen.slice(PAGE_TOOL.length))] : undefined;
+    if (!tool || !page) return onChange(chosen);
+    const { alias, tools } = toolEntry(macro, tool, page.site);
+    onChange(alias, tools);
+  };
+  return (
+    <select aria-label="tool" value={known ? value : ""} onChange={(event) => pick(event.target.value)}>
+      {known ? null : <option value="">Choose tool</option>}
+      {declared.length > 0 ? (
+        <optgroup label="In this macro">
+          {declared.map(([alias, tool]) => (
+            <option key={alias} value={alias}>
+              {tool.name}
+            </option>
+          ))}
+        </optgroup>
+      ) : null}
+      {fresh.length > 0 ? (
+        <optgroup label="On this page">
+          {fresh.map((tool, index) => (
+            <option key={`${tool.origin ?? ""} ${tool.name}`} value={`${PAGE_TOOL}${index}`}>
+              {tool.origin === undefined ? tool.name : `${tool.name} (${tool.origin})`}
+            </option>
+          ))}
+        </optgroup>
+      ) : null}
+      {declared.length === 0 && fresh.length === 0 ? (
+        <option value="" disabled>
+          {page ? "This page registers no tools" : "No page to read tools from"}
+        </option>
+      ) : null}
+    </select>
   );
 }
 

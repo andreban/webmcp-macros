@@ -23,7 +23,8 @@ export type EditorAction =
   | { type: "removeStmt"; at: Path }
   /** `to` is a position in the macro as it is before the move. */
   | { type: "moveStmt"; from: Path; to: Path }
-  | { type: "replaceNode"; at: Path; node: Stmt | Expr }
+  /** `tools` are merged as for `insertStmt`, for a tool slot set to a tool the macro did not use yet. */
+  | { type: "replaceNode"; at: Path; node: Stmt | Expr; tools?: Record<string, MacroTool> }
   /** Removes an optional field of a statement, such as `else` or a `stop` message. */
   | { type: "clearSlot"; at: Path }
   | { type: "setMeta"; meta: Partial<MacroMeta> }
@@ -186,6 +187,9 @@ function moveStmt(macro: Macro, from: Path, to: Path): Macro | undefined {
   return removed && insertStmt(removed, target, stmt.node);
 }
 
+const withTools = (macro: Macro, tools: Record<string, MacroTool> | undefined): Macro =>
+  tools ? { ...macro, tools: { ...macro.tools, ...tools } } : macro;
+
 function replaceNode(macro: Macro, at: Path, node: Stmt | Expr): Macro | undefined {
   const found = getNode(macro, at);
   if (!found || found.kind === "body" || found.node === node) return undefined;
@@ -325,16 +329,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
   const { macro, past, future } = state;
   switch (action.type) {
     case "insertStmt":
-      return commit(
-        state,
-        insertStmt(action.tools ? { ...macro, tools: { ...macro.tools, ...action.tools } } : macro, action.at, action.stmt),
-      );
+      return commit(state, insertStmt(withTools(macro, action.tools), action.at, action.stmt));
     case "removeStmt":
       return commit(state, removeStmt(macro, action.at));
     case "moveStmt":
       return commit(state, moveStmt(macro, action.from, action.to));
     case "replaceNode":
-      return commit(state, replaceNode(macro, action.at, action.node));
+      return commit(state, replaceNode(withTools(macro, action.tools), action.at, action.node));
     case "clearSlot":
       return commit(state, clearSlot(macro, action.at));
     case "setMeta":

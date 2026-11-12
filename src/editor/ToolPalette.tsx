@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { createContext, Fragment } from "react";
 import { schemaHash } from "../macro/compat";
 import { siteMatches } from "../macro/matcher";
 import type { JsonSchema, Macro, MacroTool, Stmt } from "../macro/types";
@@ -69,12 +69,11 @@ export function aliasFor(name: string, taken: readonly string[]): string {
 }
 
 /**
- * A call block for `tool` with its required arguments, and the `Macro.tools`
- * entry to merge: an alias already pointing at the tool is reused, and the
- * schema snapshot and its hash are refreshed from the page, so a later change
- * on the site can be detected.
+ * The alias for `tool` and the `Macro.tools` entry to merge: an alias already
+ * pointing at the tool is reused, and the schema snapshot and its hash are
+ * refreshed from the page, so a later change on the site can be detected.
  */
-export function toolCall(macro: Macro, tool: PaletteTool, site: string): { stmt: Stmt; tools: Record<string, MacroTool> } {
+export function toolEntry(macro: Macro, tool: PaletteTool, site: string): { alias: string; tools: Record<string, MacroTool> } {
   const existing = Object.entries(macro.tools).find(
     ([, known]) => known.site === site && known.name === tool.name && known.frameOrigin === tool.frameOrigin,
   );
@@ -85,10 +84,25 @@ export function toolCall(macro: Macro, tool: PaletteTool, site: string): { stmt:
     entry.schemaHash = schemaHash(tool.inputSchema);
   }
   if (tool.frameOrigin !== undefined) entry.frameOrigin = tool.frameOrigin;
+  return { alias, tools: { [alias]: entry } };
+}
+
+/** A call block for `tool` with its required arguments, and the `Macro.tools` entry to merge (see `toolEntry`). */
+export function toolCall(macro: Macro, tool: PaletteTool, site: string): { stmt: Stmt; tools: Record<string, MacroTool> } {
+  const { alias, tools } = toolEntry(macro, tool, site);
   const args = requiredArgs(schemaSlots(tool.inputSchema));
   const stmt: Stmt = Object.keys(args).length > 0 ? { op: "call", tool: alias, args } : { op: "call", tool: alias };
-  return { stmt, tools: { [alias]: entry } };
+  return { stmt, tools };
 }
+
+/** The palette's tools and the site they are added on, for tool slots deep in the program. */
+export interface PageTools {
+  tools: readonly PaletteTool[];
+  site: string;
+}
+
+/** Provided by the program editor; without it, tool slots offer only the macro's own tools. */
+export const PageToolsContext = createContext<PageTools | undefined>(undefined);
 
 const describeSlot = (slot: ArgSlot) => (slot.kind.type === "enum" ? `${slot.key}: ${slot.kind.options.join(" | ")}` : `${slot.key}: ${slot.kind.type}`);
 
