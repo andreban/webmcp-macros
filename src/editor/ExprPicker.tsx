@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import type { Expr, Json, Macro, Stmt } from "../macro/types";
 import { createDefaultExpr, type ExprKind, type ExprOf } from "./registry";
-import { resultFields } from "./resultFields";
+import { type ObservedSchemas, resultFields } from "./resultFields";
+import { PageToolsContext } from "./ToolPalette";
 
 /** What a literal typed into a slot must be. Tool schemas map onto it: `array` is "list". */
 export type LiteralType = "any" | "text" | "number" | "boolean" | "list" | "object";
@@ -70,6 +71,24 @@ export function variableNames(program: readonly Stmt[]): string[] {
   return [...names].toSorted();
 }
 
+// A verb in front of the noun says what the tool does, not what its result holds.
+const VERB = /^(get|open|read|fetch|load|list|find|search|lookup|query|calculate|compute|create|make|run|check)_+/i;
+
+/**
+ * A name for what calling the tool aliased `alias` returns: its name without the
+ * leading verb (open_letter gives "letter"), unused in the program so far.
+ */
+export function resultName(macro: Macro, alias: string): string {
+  const tool = macro.tools[alias]?.name ?? alias;
+  const noun = tool.replace(VERB, "").replace(/[^A-Za-z0-9_]/g, "_");
+  const base = noun || "result";
+  const taken = new Set(variableNames(macro.program));
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base}${n}`)) n += 1;
+  return `${base}${n}`;
+}
+
 /** `expr: null` clears an optional slot. */
 export interface Choice {
   label: string;
@@ -82,6 +101,7 @@ interface Context {
   /** What a wrapping kind wraps: the current value, so "not" or "x == …" build on it. */
   inner: Expr;
   tool: string;
+  observed: ObservedSchemas | undefined;
 }
 
 // Typed over every kind, so a new expression fails the build until it is offered here.
@@ -92,15 +112,16 @@ const CHOICES: { [K in ExprKind]: (ctx: Context) => { label: string; expr: ExprO
     ...variableNames(macro.program).map((name) => ({ label: `Variable: ${name}`, expr: { var: name } })),
     { label: "Other variable", expr: createDefaultExpr("var") },
   ],
-  get: ({ macro, inner }) => [
+  get: ({ macro, inner, observed }) => [
     { label: "Field of this value", expr: { get: inner, path: [] } },
-    // A saved tool result's declared fields, one pick each, so chaining needs no wrapping step.
-    ...variableNames(macro.program).flatMap((name) =>
-      resultFields(macro, { var: name }).map((field) => ({
-        label: `${name} → ${field}`,
-        expr: { get: { var: name }, path: field.split(".") },
-      })),
-    ),
+    // A saved result's fields, one pick each, so chaining needs no wrapping step. Fields come from
+    // the tool's outputSchema or the last run; with neither, the field is typed after the pick.
+    ...variableNames(macro.program).flatMap((name) => {
+      const fields = resultFields(macro, { var: name }, observed);
+      return fields.length > 0
+        ? fields.map((field) => ({ label: `${name} → ${field}`, expr: { get: { var: name }, path: field.split(".") } }))
+        : [{ label: `${name} → field…`, expr: { get: { var: name }, path: [] } }];
+    }),
   ],
   bin: ({ inner }) => [{ label: "Compare or calculate", expr: { ...createDefaultExpr("bin"), left: inner } }],
   not: ({ inner }) => [{ label: "Not this value", expr: { not: inner } }],
@@ -122,8 +143,9 @@ const CHOICES: { [K in ExprKind]: (ctx: Context) => { label: string; expr: ExprO
 };
 
 /** Everything a slot can hold, in the order the picker lists it. */
-export function pickerChoices(macro: Macro, current: Expr | undefined, optional: boolean): Choice[] {
-  const ctx: Context = { macro, current, inner: current ?? createDefaultExpr("lit"), tool: Object.keys(macro.tools)[0] ?? "" };
+export function pickerChoices(macro: Macro, current: Expr | undefined, optional: boolean, observed?: ObservedSchemas): Choice[] {
+  const inner = current ?? createDefaultExpr("lit");
+  const ctx: Context = { macro, current, inner, tool: Object.keys(macro.tools)[0] ?? "", observed };
   const choices: Choice[] = Object.values(CHOICES).flatMap((choose): Choice[] => choose(ctx));
   return optional && current ? [...choices, { label: "Nothing", expr: null }] : choices;
 }
@@ -140,7 +162,7 @@ export interface ExprPickerProps {
 
 /** A listbox of what the slot can hold: arrows move, Enter or a click picks, Escape cancels. */
 export function ExprPicker({ macro, current, optional, label, onPick, onCancel }: ExprPickerProps) {
-  const choices = pickerChoices(macro, current, optional);
+  const choices = pickerChoices(macro, current, optional, useContext(PageToolsContext)?.observed);
   const [selected, setSelected] = useState(0);
   const pick = (index: number) => {
     const choice = choices[index];

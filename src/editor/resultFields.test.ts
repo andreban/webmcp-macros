@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MACRO_VERSION, type JsonSchema, type Macro, type Stmt } from "../macro/types";
-import { fieldPaths, resultFields, schemaAt, valueSchema } from "./resultFields";
+import { fieldPaths, inferSchema, observedSchemas, resultFields, schemaAt, valueSchema } from "./resultFields";
 
 const wish = { type: "object", properties: { toy: { type: "string" }, colour: { type: "string" } } };
 const letter: JsonSchema = {
@@ -82,5 +82,35 @@ describe("valueSchema", () => {
     expect(resultFields(m, { var: "unknown" })).toEqual([]);
     expect(valueSchema(m, { var: "loop" })).toBeUndefined();
     expect(resultFields(m, { call: "toString" })).toEqual([]);
+  });
+});
+
+describe("observed schemas", () => {
+  it("infers a schema from a value, with list items from the first one", () => {
+    expect(inferSchema({ child: "Ada", wishes: [{ toy: "kite" }], age: 7, good: true, note: null })).toEqual({
+      type: "object",
+      properties: {
+        child: { type: "string" },
+        wishes: { type: "array", items: { type: "object", properties: { toy: { type: "string" } } } },
+        age: { type: "number" },
+        good: { type: "boolean" },
+        note: { type: "null" },
+      },
+    });
+  });
+
+  it("offers fields from a run for a tool without an outputSchema; a declared schema wins", () => {
+    const m = macro([
+      { op: "call", tool: "plain", saveAs: "x" },
+      { op: "forEach", var: "w", list: { get: { var: "x" }, path: ["wishes"] }, body: [] },
+      { op: "call", tool: "open", saveAs: "l" },
+    ]);
+    const observed = observedSchemas([
+      { tool: "no_schema", result: { wishes: [{ toy: "kite", colour: "red" }] } },
+      { tool: "open_letter", result: { other: 1 } },
+    ]);
+    expect(resultFields(m, { var: "x" }, observed)).toEqual(["wishes"]);
+    expect(resultFields(m, { var: "w" }, observed)).toEqual(["toy", "colour"]);
+    expect(resultFields(m, { var: "l" }, observed)).toContain("wishes");
   });
 });

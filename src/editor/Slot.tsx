@@ -1,6 +1,6 @@
 import { type Dispatch, Fragment, type ReactNode, useContext, useId, useRef, useState } from "react";
 import type { BinaryOp, Expr, Json, Macro, MacroTool, Stmt } from "../macro/types";
-import { ExprPicker, formatLiteral, type LiteralType, parseLiteral, variableNames } from "./ExprPicker";
+import { ExprPicker, formatLiteral, type LiteralType, parseLiteral, resultName, variableNames } from "./ExprPicker";
 import { type Slot as SlotDef, type SlotValue, type SlotValues, expressions, exprKind, readSlot } from "./registry";
 import { type ArgSlot, argOptions, type EnumOption, literalType, missingArgs, newArg, requiredArgs, schemaSlots, toolArgSlots } from "./schemaSlots";
 import { type EditorAction, isOptionalSlot, type Path } from "./state";
@@ -81,7 +81,8 @@ function ExprEditor({ macro, path, expr, dispatch, type, options }: EditorProps)
   // Only a tool call's arguments have a schema; `obj` and `callProc` share the slot type.
   const schema = "call" in expr ? toolArgSlots(macro, expr.call) : undefined;
   // Only a `get` has a path slot; its suggestions come from the value's outputSchema.
-  const fields = "get" in expr ? resultFields(macro, expr.get) : undefined;
+  const observed = useContext(PageToolsContext)?.observed;
+  const fields = "get" in expr ? resultFields(macro, expr.get, observed) : undefined;
   const parts = label.map((part, index) => {
     // A label is fixed per kind, so the position is a stable key.
     if (typeof part === "string") return <Fragment key={index}>{part}</Fragment>;
@@ -211,15 +212,19 @@ function Field({ macro, path, slot, dispatch, type, options, update, schema, fie
               ))}
             </select>
           ) : null}
-          <DraftField
-            label={schema ? "other field name" : "new field name"}
-            value=""
-            commit={(text) => {
-              const key = text.trim();
-              if (Object.hasOwn(records, key)) return `${key} is already set.`;
-              if (key) add(key);
-            }}
-          />
+          {/* A tool's schema lists its arguments; a free-form name is only for objects and tools without one. */}
+          {schema ? null : (
+            <DraftField
+              label="new field name"
+              placeholder="+ field"
+              value=""
+              commit={(text) => {
+                const key = text.trim();
+                if (Object.hasOwn(records, key)) return `${key} is already set.`;
+                if (key) add(key);
+              }}
+            />
+          )}
         </span>
       );
     }
@@ -262,7 +267,7 @@ function Field({ macro, path, slot, dispatch, type, options, update, schema, fie
 }
 
 // Readable names for statement fields whose key is not a word on its own.
-const FIELD_LABELS: Readonly<Record<string, string>> = { cond: "condition", saveAs: "result name", timeoutMs: "time limit" };
+const FIELD_LABELS: Readonly<Record<string, string>> = { cond: "condition", saveAs: "save result", timeoutMs: "time limit" };
 
 // What an optional field starts as when added; value slots are filled through their picker instead.
 const NEW_FIELD: { readonly [T in SlotDef["type"]]?: SlotValues[T] } = { var: "result", ms: 5000, body: [], args: {} };
@@ -307,7 +312,8 @@ export function StmtSlot({ macro, at, stmt, part, dispatch, renderBody }: StmtSl
     );
   }
   if (slot === undefined) {
-    const value = NEW_FIELD[part.type];
+    // A result is named after its tool (open_letter gives "letter"), so the name says what it holds.
+    const value = stmt.op === "call" && part.slot === "saveAs" ? resultName(macro, stmt.tool) : NEW_FIELD[part.type];
     return value === undefined ? null : (
       <button type="button" className="wmm-slot-button" onClick={() => update(value)}>
         + {label}
@@ -422,7 +428,19 @@ function Choose({ label, value, options, onChange }: { label: string; value: str
  * `commit` returns an error message to keep the draft and show it next to the
  * field; Escape drops the draft.
  */
-function DraftField({ label, value, list, commit }: { label: string; value: string; list?: string; commit: (text: string) => string | undefined | void }) {
+function DraftField({
+  label,
+  value,
+  list,
+  placeholder,
+  commit,
+}: {
+  label: string;
+  value: string;
+  list?: string;
+  placeholder?: string;
+  commit: (text: string) => string | undefined | void;
+}) {
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState("");
   const errorId = useId();
@@ -441,7 +459,8 @@ function DraftField({ label, value, list, commit }: { label: string; value: stri
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? errorId : undefined}
         value={text}
-        size={Math.max(3, text.length)}
+        placeholder={placeholder}
+        size={Math.max(3, text.length, placeholder?.length ?? 0)}
         list={list}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={save}

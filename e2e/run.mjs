@@ -20,7 +20,7 @@ const RUN_TIMEOUT_MS = 30_000;
 // WebMCP needs a secure context, and http://localhost is one.
 // `/navigate`, `/flights` and `/frames` (with any query) serve their fixtures, `/cross` the
 // cross-site one (on localhost and 127.0.0.1, two origins); every other path the rocket.
-const fixtures = { "/navigate": "navigate.html", "/flights": "flights.html", "/frames": "frames.html", "/cross": "cross.html" };
+const fixtures = { "/navigate": "navigate.html", "/flights": "flights.html", "/frames": "frames.html", "/cross": "cross.html", "/santa": "santa.html" };
 const server = createServer(async (request, response) => {
   const fixture = fixtures[new URL(request.url, "http://localhost").pathname] ?? "rocket.html";
   response.setHeader("content-type", "text/html");

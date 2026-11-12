@@ -1,4 +1,4 @@
-import type { Expr, JsonSchema, Macro, Stmt } from "../macro/types";
+import type { Expr, Json, JsonSchema, Macro, Stmt } from "../macro/types";
 
 /**
  * Field paths to suggest for a `get`, read from the `outputSchema` snapshots
@@ -53,33 +53,69 @@ function* statements(body: readonly Stmt[]): Generator<Stmt> {
   }
 }
 
+/** Result schemas learned from a run, by page tool name, for tools whose page declares no outputSchema. */
+export type ObservedSchemas = Readonly<Record<string, JsonSchema>>;
+
+/**
+ * The shape of `value` as a schema: object keys, list items (from the first
+ * item) and leaf types. Only the shape is kept, never the values, and it is
+ * only ever a suggestion, so a list whose items differ is not merged.
+ */
+export function inferSchema(value: Json, depth = 4): JsonSchema {
+  if (Array.isArray(value)) {
+    const [first] = value;
+    return first === undefined || depth === 0 ? { type: "array" } : { type: "array", items: inferSchema(first, depth - 1) };
+  }
+  if (value !== null && typeof value === "object") {
+    if (depth === 0) return { type: "object" };
+    const entries = Object.entries(value).slice(0, 50);
+    return { type: "object", properties: Object.fromEntries(entries.map(([key, child]) => [key, inferSchema(child, depth - 1)])) };
+  }
+  return value === null ? { type: "null" } : { type: typeof value };
+}
+
+/** Schemas of the results a run returned, the latest call of each tool winning. */
+export function observedSchemas(calls: readonly { tool: string; result: Json }[]): ObservedSchemas {
+  return Object.fromEntries(calls.map((call) => [call.tool, inferSchema(call.result)]));
+}
+
+/** A tool's declared outputSchema, or else the shape its last result had. */
+function toolOutput(macro: Macro, alias: string, observed: ObservedSchemas | undefined): JsonSchema | undefined {
+  const tool = Object.hasOwn(macro.tools, alias) ? macro.tools[alias] : undefined;
+  if (!tool) return undefined;
+  return tool.outputSchema ?? (observed && Object.hasOwn(observed, tool.name) ? observed[tool.name] : undefined);
+}
+
 /**
  * The schema of a value: a tool call's result, a variable saved from one, a
  * `for each` variable over a list inside one, or a field of any of these.
  * A variable is traced to the first statement that sets it; `seen` stops
  * `set x = field of x` from looping.
  */
-export function valueSchema(macro: Macro, expr: Expr, seen: ReadonlySet<string> = new Set()): JsonSchema | undefined {
-  if ("call" in expr) return Object.hasOwn(macro.tools, expr.call) ? macro.tools[expr.call]?.outputSchema : undefined;
-  if ("get" in expr) return schemaAt(valueSchema(macro, expr.get, seen), expr.path);
+export function valueSchema(
+  macro: Macro,
+  expr: Expr,
+  observed?: ObservedSchemas,
+  seen: ReadonlySet<string> = new Set(),
+): JsonSchema | undefined {
+  if ("call" in expr) return toolOutput(macro, expr.call, observed);
+  if ("get" in expr) return schemaAt(valueSchema(macro, expr.get, observed, seen), expr.path);
   if (!("var" in expr) || seen.has(expr.var)) return undefined;
   const name = expr.var;
   const bodies = [macro.program, ...Object.values(macro.procedures ?? {}).map((procedure) => procedure.body)];
   for (const stmt of bodies.flatMap((body) => [...statements(body)])) {
     const inner = new Set([...seen, name]);
-    if (stmt.op === "call" && stmt.saveAs === name) {
-      return Object.hasOwn(macro.tools, stmt.tool) ? macro.tools[stmt.tool]?.outputSchema : undefined;
-    }
+    if (stmt.op === "call" && stmt.saveAs === name) return toolOutput(macro, stmt.tool, observed);
     if (stmt.op === "forEach" && stmt.var === name) {
-      const list = valueSchema(macro, stmt.list, inner);
+      const list = valueSchema(macro, stmt.list, observed, inner);
       return list && items(list);
     }
-    if (stmt.op === "set" && stmt.var === name) return valueSchema(macro, stmt.value, inner);
+    if (stmt.op === "set" && stmt.var === name) return valueSchema(macro, stmt.value, observed, inner);
   }
   return undefined;
 }
 
 /** Paths to suggest for the field slot of a `get` whose value is `of`. */
-export function resultFields(macro: Macro, of: Expr): string[] {
-  return fieldPaths(valueSchema(macro, of));
+export function resultFields(macro: Macro, of: Expr, observed?: ObservedSchemas): string[] {
+  return fieldPaths(valueSchema(macro, of, observed));
 }

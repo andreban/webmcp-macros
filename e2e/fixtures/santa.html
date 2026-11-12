@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Santa's workshop fixture</title>
+  </head>
+  <body>
+    <!-- A stand-in for bandarra.me/apps/webmcp-santa-workshop: the same three tools, and no outputSchema. -->
+    <p>Letter: <span id="letter"></span></p>
+    <p>Sack: <span id="sack"></span></p>
+    <p>Delivered: <span id="delivered">0</span></p>
+    <script>
+      const letters = [
+        { child: "Lena", chimney: "94 Mistletoe Close", wishes: [{ toy: "robot", colour: "green" }, { toy: "drum", colour: "red" }] },
+        { child: "Tomás", chimney: "3 Holly Lane", wishes: [{ toy: "kite", colour: "blue" }] },
+      ];
+      let index = 0;
+      let sack = [];
+      const show = () => {
+        document.getElementById("letter").textContent = letters[index % letters.length].child;
+        document.getElementById("sack").textContent = sack.map((toy) => `${toy.colour} ${toy.toy}`).join(", ");
+      };
+      const register = (tool) => document.modelContext.registerTool(tool);
+      if (document.modelContext) {
+        register({
+          name: "open_letter",
+          description: "Reads the letter on the desk: the child, their chimney and their wishes.",
+          inputSchema: { type: "object", properties: {} },
+          annotations: { readOnlyHint: true },
+          execute: () => letters[index % letters.length],
+        });
+        register({
+          name: "build_toy",
+          description: "Builds one toy and puts it in the sack.",
+          inputSchema: {
+            type: "object",
+            properties: { toy: { type: "string" }, colour: { enum: ["red", "green", "blue", "gold"] } },
+            required: ["toy", "colour"],
+          },
+          execute: ({ toy, colour }) => {
+            sack.push({ toy, colour });
+            show();
+            return { built: `${colour} ${toy}` };
+          },
+        });
+        register({
+          name: "load_sleigh",
+          description: "Sends the sack to the child; the next letter arrives.",
+          inputSchema: {
+            type: "object",
+            properties: { to: { type: "string" }, address: { type: "string" } },
+            required: ["to", "address"],
+          },
+          execute: ({ to, address }) => {
+            const letter = letters[index % letters.length];
+            if (to !== letter.child || address !== letter.chimney) throw new Error("Wrong child or chimney.");
+            index++;
+            sack = [];
+            document.getElementById("delivered").textContent = String(index);
+            show();
+            return { delivered: to };
+          },
+        });
+        show();
+      }
+    </script>
+  </body>
+</html>

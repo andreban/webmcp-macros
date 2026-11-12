@@ -3,6 +3,7 @@ import { schemaHash } from "../macro/compat";
 import { siteMatches } from "../macro/matcher";
 import type { JsonSchema, Macro, MacroTool, Stmt } from "../macro/types";
 import { requiredArgs, schemaSlots } from "./schemaSlots";
+import type { ObservedSchemas } from "./resultFields";
 import type { LivePage } from "./SitesPanel";
 
 /** A tool the palette offers: one the page registers now, or one the macro already uses. */
@@ -104,6 +105,8 @@ export function toolCall(macro: Macro, tool: PaletteTool, site: string): { stmt:
 export interface PageTools {
   tools: readonly PaletteTool[];
   site: string;
+  /** Result shapes from the editor's last run, for tools that declare no outputSchema. */
+  observed?: ObservedSchemas;
 }
 
 /** Provided by the program editor; without it, tool slots offer only the macro's own tools. */
