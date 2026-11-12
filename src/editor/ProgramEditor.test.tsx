@@ -25,6 +25,11 @@ describe("ProgramEditor", () => {
     expect(html).toMatch(/aria-label="milliseconds"[^>]* value="10"/);
   });
 
+  it("heads the program with a hat that takes no focus and is not announced", () => {
+    const html = renderToStaticMarkup(<ProgramEditor macro={rocketLauncherMacro} dispatch={() => {}} />);
+    expect(html).toContain('<div class="wmm-hat" aria-hidden="true">when run</div><ol class="wmm-blocks">');
+  });
+
   it("offers an empty program as a place to insert", () => {
     const html = renderToStaticMarkup(<ProgramEditor macro={{ ...rocketLauncherMacro, program: [] }} dispatch={() => {}} />);
     expect(html).toMatch(/<div class="wmm-empty" data-path="\[&quot;program&quot;,0\]" tabindex="0"[^>]*>empty<\/div>/);

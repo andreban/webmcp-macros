@@ -9,10 +9,12 @@
   --wmm-bg: #fff;
   --wmm-border: #d0d7de;
   --wmm-accent: #1f6feb;
-  --wmm-call: #ddf4ff;
-  --wmm-control: #fff8c5;
-  --wmm-data: #dafbe1;
-  --wmm-user: #fbefff;
+  /* Saturated, as in Scratch, and dark enough for white text at WCAG AA (at least 5:1). */
+  --wmm-call: #2f5fc4;
+  --wmm-control: #a35f00;
+  --wmm-data: #1e7b45;
+  --wmm-user: #7046d6;
+  --wmm-on-block: #fff;
   color: var(--wmm-fg);
 }
 @media (prefers-color-scheme: dark) {
@@ -21,22 +23,39 @@
     --wmm-bg: #0d1117;
     --wmm-border: #30363d;
     --wmm-accent: #4493f8;
-    --wmm-call: #0c2d6b;
-    --wmm-control: #4b3a00;
-    --wmm-data: #0f3d1e;
-    --wmm-user: #3c1e70;
   }
 }
 .wmm-blocks { list-style: none; margin: 6px 0 0; padding: 0; }
-.wmm-blocks .wmm-blocks { margin: 6px 0 2px 10px; padding-left: 8px; border-left: 2px solid var(--wmm-border); }
-.wmm-blocks > li + li { margin-top: 4px; }
-.wmm-block { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--wmm-border); line-height: 1.9; overflow-wrap: anywhere; }
+/* A container's body sits inside the block's colour, which wraps it like a C. */
+.wmm-blocks .wmm-blocks { margin: 4px 0 4px 14px; padding: 4px; border-radius: 4px; background: var(--wmm-bg); color: var(--wmm-fg); }
+/* Stacked blocks touch, and each one's tab reaches into the next, so a stack reads as snapped together. */
+.wmm-blocks > li + li { margin-top: 2px; }
+.wmm-block {
+  position: relative;
+  padding: 5px 8px;
+  border-radius: 4px;
+  border: 1px solid rgb(0 0 0 / 0.25);
+  color: var(--wmm-on-block);
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+.wmm-blocks .wmm-block::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  bottom: -5px;
+  width: 22px;
+  height: 5px;
+  border-radius: 0 0 4px 4px;
+  background: inherit;
+  z-index: 1;
+}
 .wmm-block--call { background: var(--wmm-call); }
 .wmm-block--control { background: var(--wmm-control); }
 .wmm-block--data { background: var(--wmm-data); }
 .wmm-block--user { background: var(--wmm-user); }
-.wmm-verb { font-weight: 600; }
-.wmm-pill { display: inline-block; padding: 0 6px; border-radius: 10px; border: 1px solid var(--wmm-border); background: var(--wmm-bg); line-height: 1.5; }
+.wmm-verb { font-weight: 700; }
+.wmm-pill { display: inline-block; padding: 0 6px; border-radius: 10px; border: 1px solid var(--wmm-border); background: var(--wmm-bg); color: var(--wmm-fg); line-height: 1.5; }
 .wmm-pill--input { border-color: var(--wmm-accent); }
 .wmm-tool { font: 600 12px ui-monospace, monospace; }
 .wmm-arg + .wmm-arg::before,
