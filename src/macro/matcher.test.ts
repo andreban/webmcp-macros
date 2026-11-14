@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, it } from "vitest";
 import { matchingMacros, patternToRegExp, siteMatches, triggerSatisfied } from "./matcher";
 import { MACRO_VERSION, type Macro } from "./types";

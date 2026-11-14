@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Relative dates for date inputs (spec §11): a default or preset can say
  * `today+14d` instead of a fixed day, so a shared macro or a saved preset

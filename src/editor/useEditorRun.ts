@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { useCallback, useEffect, useReducer } from "react";
 import type { Json, Macro } from "../macro/types";
 import { isRunEvent, type BackgroundRequest } from "../messages";

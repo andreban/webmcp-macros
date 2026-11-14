@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { createContext } from "react";
 import { schemaHash } from "../macro/compat";
 import { siteMatches } from "../macro/matcher";

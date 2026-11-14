@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 // Drag and drop for the program, on the browser's native HTML5 events. A drop
 // dispatches the same `moveStmt` and `insertStmt` actions as Alt+arrows and the
 // palette, and the reducer decides what is allowed, so both ways in agree.

@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Whether a site's tools still fit a macro. Sites change their tool schemas
  * without notice; a macro is checked against the tools the page registers now

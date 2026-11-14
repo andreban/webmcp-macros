@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Decides which tab each site of a run uses. The trigger site is the tab the
  * run started on. Another site uses the tab it used before while that tab is

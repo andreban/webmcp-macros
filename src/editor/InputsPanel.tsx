@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { type Dispatch, type KeyboardEvent, useState } from "react";
 import type { Json, JsonSchema, Macro, MacroInput } from "../macro/types";
 import { fieldFor } from "../ui/InputForm";

@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 // Renders public/icons/logo.svg to the PNG sizes the manifest lists. Chromium does
 // the rasterising so the PNGs match how the SVG looks in the browser.
 import { readFile, writeFile } from "node:fs/promises";

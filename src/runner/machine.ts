@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The state of a run as plain JSON: a stack of frames, one per block being
  * executed, with a program counter each, plus the variables and counters.

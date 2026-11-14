@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The launcher's styles, injected as a string into its closed shadow root.
  * Importing a CSS file here would leak it into the host page.

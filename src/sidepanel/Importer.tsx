@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { useEffect, useRef, useState } from "react";
 import { decodeMacro, MacroDecodeError } from "../macro/codec";
 import type { Macro } from "../macro/types";

@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The macro format. A macro is plain JSON: the editor renders it, the runner
  * interprets it, and the share string encodes it. There is no other

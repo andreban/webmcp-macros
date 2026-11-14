@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState } from "react";
 import { checkCompatibility } from "../macro/compat";
 import { matchingMacros } from "../macro/matcher";

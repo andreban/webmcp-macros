@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Runs a macro's program against a ToolHost. The host is the only way out:
  * the interpreter cannot evaluate code, touch the DOM or make network calls.

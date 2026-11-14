@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { useContext, useState } from "react";
 import type { Expr, Json, Macro, Stmt } from "../macro/types";
 import { createDefaultExpr, type ExprKind, type ExprOf } from "./registry";

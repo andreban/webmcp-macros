@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The only module that touches `document.modelContext`. WebMCP is in an
  * origin trial and its shape still changes between Chrome releases, so every

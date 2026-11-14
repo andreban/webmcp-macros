@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The content script's tool bridge, kept free of `chrome.*` so it runs under
  * Vitest: `index.ts` wires it to the runtime channel and the WebMCP adapter.

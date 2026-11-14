@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { Importer } from "./Importer";
 import { SavedMacros, useSavedMacros } from "./SavedMacros";
 import { ThisPage } from "./ThisPage";

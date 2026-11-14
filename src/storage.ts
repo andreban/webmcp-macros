@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Saved macros and remembered inputs, in `chrome.storage.local`. Remembered
  * inputs are personal data: they are kept under their own key per macro and

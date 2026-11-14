@@ -1,3 +1,6 @@
+/* Copyright 2026 André Cipriani Bandarra
+ * SPDX-License-Identifier: Apache-2.0 */
+
 /*
  * Blocks for ProgramView. Everything is namespaced under `wmm-` and the
  * colours are custom properties on `.wmm-program`, so the same rules work in

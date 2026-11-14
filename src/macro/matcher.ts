@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Decides whether a macro should be offered on a page: its trigger site must
  * match the URL and one of its trigger tool sets must be registered right now.

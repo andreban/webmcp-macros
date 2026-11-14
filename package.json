@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Chrome extension that runs deterministic, shareable automations against the WebMCP tools a website registers.",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

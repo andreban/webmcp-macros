@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * When the on-page launcher exists. Kept free of `chrome.*`, React and the DOM
  * so it runs under Vitest: `index.ts` applies the answer.

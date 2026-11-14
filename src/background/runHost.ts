@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The service worker's run host: one run per tab, a cache of tool names per
  * tab and frame, and the `ToolHost` that connects a run to its tab. Chrome is reached

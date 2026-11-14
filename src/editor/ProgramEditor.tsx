@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { type Dispatch, type FocusEvent, Fragment, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import type { Macro, MacroTool, Stmt } from "../macro/types";
 import { focusAfterRemove, focusStops, insertionPoint, moveDestination, pathKey } from "./blockNav";

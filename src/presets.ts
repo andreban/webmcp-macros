@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Presets: named sets of input values for one macro, such as "Weekend in
  * Lisbon". They are personal data, so they live in `chrome.storage.local`

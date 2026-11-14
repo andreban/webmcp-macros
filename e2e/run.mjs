@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * End-to-end check: loads the built extension into Chromium with WebMCP
  * enabled, opens the rocket fixture, and runs the bundled sample macro; then
