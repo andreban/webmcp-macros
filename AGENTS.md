@@ -104,6 +104,15 @@ Run `npm run typecheck && npm test && npm run build` before every push.
   checked by hand or by `npm run test:e2e`.
 - Write code comments for the reader of the code (constraints, invariants,
   why), not as a record of the change.
+- The project is Apache-2.0. Every new `.ts`, `.tsx`, `.mjs`, `.css` file and
+  extension HTML page starts with this header (as a `/* */` comment in CSS, and
+  an HTML comment after `<!doctype html>` in HTML), using the year the file was
+  created. E2E fixtures, JSON, Markdown and `.agents/skills` are exempt.
+
+  ```ts
+  // Copyright 2026 André Cipriani Bandarra
+  // SPDX-License-Identifier: Apache-2.0
+  ```
 
 ## Skills
 
