@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Keeps each tab's run in `chrome.storage.session` so a run outlives the
  * service worker: Chrome stops an idle worker after about 30 seconds, and a

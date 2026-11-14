@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { type Dispatch, Fragment, type ReactNode, useContext, useId, useRef, useState } from "react";
 import type { BinaryOp, Expr, Json, Macro, MacroTool, Stmt } from "../macro/types";
 import { ExprPicker, formatLiteral, type LiteralType, parseLiteral, resultName, variableNames } from "./ExprPicker";

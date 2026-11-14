@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Service worker: owns macro runs. The runner lives here, not in the page, so
  * a run survives the navigations its own tool calls cause. This file only

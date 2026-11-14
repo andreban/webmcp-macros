@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { MACRO_VERSION, type Expr, type Macro, type Stmt } from "../macro/types";
 
 /**

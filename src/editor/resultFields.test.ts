@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, it } from "vitest";
 import { MACRO_VERSION, type JsonSchema, type Macro, type Stmt } from "../macro/types";
 import { fieldPaths, inferSchema, observedSchemas, resultFields, schemaAt, valueSchema } from "./resultFields";

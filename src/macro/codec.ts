@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Share strings: `wmm1.<base64url(deflate-raw(canonical JSON))>.<crc32 hex>`.
  *

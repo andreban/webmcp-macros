@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 // Proposes a trigger from the program, so a new macro is offered on its site
 // without the author having to work out which tools the page registers first.
 import type { Expr, Macro, MacroTrigger, Stmt } from "../macro/types";

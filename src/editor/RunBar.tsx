@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState } from "react";
 import type { Json, Macro } from "../macro/types";
 import { InputForm } from "../ui/InputForm";

@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { type Dispatch, type KeyboardEvent, useEffect, useId, useState } from "react";
 import { siteMatches, triggerSatisfied } from "../macro/matcher";
 import type { Macro, MacroTrigger, ToolInfo } from "../macro/types";

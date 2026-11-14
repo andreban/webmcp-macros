@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 // Editor state: the macro JSON plus undo/redo history, changed only through
 // `editorReducer`. Nodes are addressed by paths, so there is no second model.
 import type { Expr, Macro, MacroInput, MacroTool, Stmt } from "../macro/types";

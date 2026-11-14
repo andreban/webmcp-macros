@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { MACRO_VERSION, type BinaryOp, type Expr, type Json, type Macro, type Stmt } from "../macro/types";
 import { flightSearchPage } from "./flightSearch";
 import { EDITOR_SITE, editorSite, editorTools, saveSummary } from "./saveSummary";

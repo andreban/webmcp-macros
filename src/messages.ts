@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Messages between the content script, the background service worker and the
  * extension pages. Every union is discriminated on `type`; add a variant here

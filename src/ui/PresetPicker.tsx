@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { useEffect, useId, useState, type KeyboardEvent } from "react";
 import type { Json } from "../macro/types";
 import { deletePreset, loadPresets, renamePreset, savePreset, type Preset } from "../presets";

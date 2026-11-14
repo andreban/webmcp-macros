@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 // Pure helpers for the editor page: its URL, a new macro, the dirty check and shortcuts.
 import { MACRO_VERSION, type Macro } from "../macro/types";
 

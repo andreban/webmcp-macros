@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, it, vi } from "vitest";
 import type { Json } from "../macro/types";
 import { runMacro, type ToolHost } from "../runner/interpreter";

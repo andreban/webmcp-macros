@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { resolveRelativeDate } from "../macro/relativeDate";
 import type { Json, JsonSchema, Macro, MacroInput } from "../macro/types";

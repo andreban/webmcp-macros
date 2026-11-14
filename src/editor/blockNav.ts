@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 // Keyboard navigation over the program, in paths. Pure, so the rules are
 // unit-tested without a DOM; the component only maps keys to these.
 import type { Macro, Stmt } from "../macro/types";

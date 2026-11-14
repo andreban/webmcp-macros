@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useReducer, useState } from "react";
 import type { Macro } from "../macro/types";
 import type { NodePath } from "../runner/machine";

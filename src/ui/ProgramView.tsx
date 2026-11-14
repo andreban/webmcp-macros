@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { Fragment, type ReactNode } from "react";
 import { type Category, type Slot, type SlotValue, expressions, exprKind, readSlot, statements } from "../editor/registry";
 import type { Expr, Macro, Stmt } from "../macro/types";

@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Macro } from "../macro/types";
 import { adventureMacro } from "./adventure";
 import { flightSearchMacro } from "./flightSearch";

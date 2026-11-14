@@ -1,3 +1,6 @@
+// Copyright 2026 André Cipriani Bandarra
+// SPDX-License-Identifier: Apache-2.0
+
 import { MACRO_VERSION, type Macro, type MacroSite } from "../macro/types";
 
 const FLIGHT_DEMO = "https://googlechromelabs.github.io/webmcp-tools/demos/react-flightsearch/";

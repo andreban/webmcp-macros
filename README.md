@@ -28,3 +28,7 @@ Load the extension from `chrome://extensions` with **Developer mode** on,
 ## Contributing
 
 See [AGENTS.md](AGENTS.md) for the architecture, conventions and workflow.
+
+## License
+
+[Apache License 2.0](LICENSE).
